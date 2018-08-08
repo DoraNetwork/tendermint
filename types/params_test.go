@@ -9,9 +9,9 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 )
 
-func newConsensusParams(blockSize, partSize int) ConsensusParams {
+func newConsensusParams(dataSize, partSize int) ConsensusParams {
 	return ConsensusParams{
-		BlockSize:   BlockSize{MaxBytes: blockSize},
+		BlockSize:   BlockSize{MaxTxsBytes: dataSize},
 		BlockGossip: BlockGossip{BlockPartSizeBytes: partSize},
 	}
 }
@@ -42,14 +42,14 @@ func TestConsensusParamsValidation(t *testing.T) {
 	}
 }
 
-func makeParams(blockBytes, blockTx, blockGas, txBytes,
+func makeParams(dataSize, blockTx, blockGas, txBytes,
 	txGas, partSize int) ConsensusParams {
 
 	return ConsensusParams{
 		BlockSize: BlockSize{
-			MaxBytes: blockBytes,
-			MaxTxs:   blockTx,
-			MaxGas:   int64(blockGas),
+			MaxTxsBytes: dataSize,
+			MaxTxs:      blockTx,
+			MaxGas:      int64(blockGas),
 		},
 		TxSize: TxSize{
 			MaxBytes: txBytes,
@@ -105,9 +105,9 @@ func TestConsensusParamsUpdate(t *testing.T) {
 			makeParams(1, 2, 3, 4, 5, 6),
 			&abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxBytes: -100,
-					MaxTxs:   -200,
-					MaxGas:   -300,
+					MaxTxsBytes: -100,
+					MaxTxs:      -200,
+					MaxGas:      -300,
 				},
 				TxSize: &abci.TxSize{
 					MaxBytes: -400,
@@ -124,9 +124,9 @@ func TestConsensusParamsUpdate(t *testing.T) {
 			makeParams(1, 2, 3, 4, 5, 6),
 			&abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxBytes: 100,
-					MaxTxs:   200,
-					MaxGas:   300,
+					MaxTxsBytes: 100,
+					MaxTxs:      200,
+					MaxGas:      300,
 				},
 				TxSize: &abci.TxSize{
 					MaxBytes: 400,

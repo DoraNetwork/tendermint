@@ -153,6 +153,15 @@ func NewConsensusState(
 	cs.setProposal = cs.defaultSetProposal
 
 	cs.updateToState(state)
+
+	// filter mempool txs based on consensus params
+	cs.mempool.SetFilter(func(tx types.Tx) bool {
+		if len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes {
+			return true
+		}
+		return false
+	})
+
 	// Don't call scheduleRound0 yet.
 	// We do that upon Start().
 	cs.reconstructLastCommit(state)
@@ -947,7 +956,8 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 	}
 
 	// Mempool validated transactions
-	txs := cs.mempool.Reap(cs.state.ConsensusParams.BlockSize.MaxTxs)
+	txs := cs.mempool.Reap(cs.state.ConsensusParams.BlockSize.MaxTxs,
+		cs.state.ConsensusParams.BlockSize.MaxTxsBytes)
 	evidence := cs.evpool.PendingEvidence()
 	proposerAddr := cs.privValidator.GetAddress()
 	block, parts := cs.state.MakeBlock(cs.Height, txs, commit, evidence, proposerAddr)
@@ -1328,6 +1338,14 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
+	// update mempool filter because consensus params might have changed
+	cs.mempool.SetFilter(func(tx types.Tx) bool {
+		if len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes {
+			return true
+		}
+		return false
+	})
+
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
 	cs.scheduleRound0(&cs.RoundState)
@@ -1438,7 +1456,14 @@ func (cs *ConsensusState) addProposalBlockPart(msg *BlockPartMessage, peerID p2p
 	}
 	if added && cs.ProposalBlockParts.IsComplete() {
 		// Added and completed!
-		_, err = cdc.UnmarshalBinaryReader(cs.ProposalBlockParts.GetReader(), &cs.ProposalBlock, int64(cs.state.ConsensusParams.BlockSize.MaxBytes))
+		maxDataSize := cs.state.ConsensusParams.BlockSize.MaxTxsBytes
+		// header + evidence + last commit
+		const maxOtherPartsSize = 5000000 // 5 MB
+		_, err = cdc.UnmarshalBinaryReader(
+			cs.ProposalBlockParts.GetReader(),
+			&cs.ProposalBlock,
+			int64(maxDataSize+maxOtherPartsSize),
+		)
 		if err != nil {
 			return true, err
 		}

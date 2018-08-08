@@ -57,6 +57,8 @@ var (
 	ErrMempoolIsFull = errors.New("Mempool is full")
 )
 
+// type Filter func(types.Tx) bool
+
 // TxID is the hex encoded hash of the bytes as a types.Tx.
 func TxID(tx []byte) string {
 	return fmt.Sprintf("%X", types.Tx(tx).Hash())
@@ -90,6 +92,9 @@ type Mempool struct {
 	logger log.Logger
 
 	metrics *Metrics
+
+	// Filter mempool to only accept txs for which filter(tx) returns true.
+	filter func(types.Tx) bool
 }
 
 // MempoolOption sets an optional parameter on the Mempool.
@@ -141,6 +146,12 @@ func (mem *Mempool) SetLogger(l log.Logger) {
 // WithMetrics sets the metrics.
 func WithMetrics(metrics *Metrics) MempoolOption {
 	return func(mem *Mempool) { mem.metrics = metrics }
+}
+
+// SetFilter sets a filter for mempool to only accept txs for which f(tx)
+// returns true.
+func (mem *Mempool) SetFilter(f func(types.Tx) bool) {
+	mem.filter = f
 }
 
 // CloseWAL closes and discards the underlying WAL file.
@@ -237,6 +248,10 @@ func (mem *Mempool) CheckTx(tx types.Tx, cb func(*abci.Response)) (err error) {
 
 	if mem.Size() >= mem.config.Size {
 		return ErrMempoolIsFull
+	}
+
+	if mem.filter != nil && !mem.filter(tx) {
+		return
 	}
 
 	// CACHE
@@ -368,7 +383,8 @@ func (mem *Mempool) notifyTxsAvailable() {
 
 // Reap returns a list of transactions currently in the mempool.
 // If maxTxs is -1, there is no cap on the number of returned transactions.
-func (mem *Mempool) Reap(maxTxs int) types.Txs {
+// If maxTxsBytes is -1, there is no cap on the size of returned transactions.
+func (mem *Mempool) Reap(maxTxs, maxTxsBytes int) types.Txs {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 
@@ -377,20 +393,33 @@ func (mem *Mempool) Reap(maxTxs int) types.Txs {
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	txs := mem.collectTxs(maxTxs)
+	txs := mem.collectTxs(maxTxs, maxTxsBytes)
 	return txs
 }
 
 // maxTxs: -1 means uncapped, 0 means none
-func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
+// maxTxsBytes: -1 means uncapped
+// maxTxsBytes takes precedence over maxTxs
+func (mem *Mempool) collectTxs(maxTxs, maxTxsBytes int) types.Txs {
+	var txsBytes int
+
 	if maxTxs == 0 {
 		return []types.Tx{}
-	} else if maxTxs < 0 {
+	}
+
+	if maxTxs == -1 {
 		maxTxs = mem.txs.Len()
 	}
+
 	txs := make([]types.Tx, 0, cmn.MinInt(mem.txs.Len(), maxTxs))
 	for e := mem.txs.Front(); e != nil && len(txs) < maxTxs; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
+
+		if maxTxsBytes > 0 && txsBytes+len(memTx.tx) > maxTxsBytes {
+			return txs
+		}
+		txsBytes += len(memTx.tx)
+
 		txs = append(txs, memTx.tx)
 	}
 	return txs

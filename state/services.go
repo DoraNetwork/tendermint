@@ -22,29 +22,32 @@ type Mempool interface {
 
 	Size() int
 	CheckTx(types.Tx, func(*abci.Response)) error
-	Reap(int) types.Txs
+	Reap(maxTxs, maxTxsBytes int) types.Txs
 	Update(height int64, txs types.Txs) error
 	Flush()
 	FlushAppConn() error
 
 	TxsAvailable() <-chan struct{}
 	EnableTxsAvailable()
+
+	SetFilter(func(types.Tx) bool)
 }
 
 // MockMempool is an empty implementation of a Mempool, useful for testing.
 type MockMempool struct {
 }
 
-func (m MockMempool) Lock()                                              {}
-func (m MockMempool) Unlock()                                            {}
-func (m MockMempool) Size() int                                          { return 0 }
-func (m MockMempool) CheckTx(tx types.Tx, cb func(*abci.Response)) error { return nil }
-func (m MockMempool) Reap(n int) types.Txs                               { return types.Txs{} }
-func (m MockMempool) Update(height int64, txs types.Txs) error           { return nil }
-func (m MockMempool) Flush()                                             {}
-func (m MockMempool) FlushAppConn() error                                { return nil }
-func (m MockMempool) TxsAvailable() <-chan struct{}                      { return make(chan struct{}) }
-func (m MockMempool) EnableTxsAvailable()                                {}
+func (MockMempool) Lock()                                              {}
+func (MockMempool) Unlock()                                            {}
+func (MockMempool) Size() int                                          { return 0 }
+func (MockMempool) CheckTx(tx types.Tx, cb func(*abci.Response)) error { return nil }
+func (MockMempool) Reap(maxTxs, maxTxsBytes int) types.Txs             { return types.Txs{} }
+func (MockMempool) Update(height int64, txs types.Txs) error           { return nil }
+func (MockMempool) Flush()                                             {}
+func (MockMempool) FlushAppConn() error                                { return nil }
+func (MockMempool) TxsAvailable() <-chan struct{}                      { return make(chan struct{}) }
+func (MockMempool) EnableTxsAvailable()                                {}
+func (MockMempool) SetFilter(func(types.Tx) bool)                      {}
 
 //------------------------------------------------------
 // blockstore
