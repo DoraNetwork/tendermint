@@ -22,7 +22,7 @@ type Mempool interface {
 
 	Size() int
 	CheckTx(types.Tx, func(*abci.Response)) error
-	Reap(maxTxs, maxTxsBytes int) types.Txs
+	ReapMaxBytes(max int) types.Txs
 	Update(height int64, txs types.Txs) error
 	Flush()
 	FlushAppConn() error
@@ -41,7 +41,7 @@ func (MockMempool) Lock()                                              {}
 func (MockMempool) Unlock()                                            {}
 func (MockMempool) Size() int                                          { return 0 }
 func (MockMempool) CheckTx(tx types.Tx, cb func(*abci.Response)) error { return nil }
-func (MockMempool) Reap(maxTxs, maxTxsBytes int) types.Txs             { return types.Txs{} }
+func (MockMempool) ReapMaxBytes(max int) types.Txs                     { return types.Txs{} }
 func (MockMempool) Update(height int64, txs types.Txs) error           { return nil }
 func (MockMempool) Flush()                                             {}
 func (MockMempool) FlushAppConn() error                                { return nil }

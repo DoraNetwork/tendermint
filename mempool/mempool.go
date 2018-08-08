@@ -381,10 +381,10 @@ func (mem *Mempool) notifyTxsAvailable() {
 	}
 }
 
-// Reap returns a list of transactions currently in the mempool.
-// If maxTxs is -1, there is no cap on the number of returned transactions.
-// If maxTxsBytes is -1, there is no cap on the size of returned transactions.
-func (mem *Mempool) Reap(maxTxs, maxTxsBytes int) types.Txs {
+// ReapMaxBytes reaps transactions from the mempool up to n bytes total.
+// If max is negative, there is no cap on the size of all returned
+// transactions (~ all available transactions).
+func (mem *Mempool) ReapMaxBytes(max int) types.Txs {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 
@@ -393,33 +393,34 @@ func (mem *Mempool) Reap(maxTxs, maxTxsBytes int) types.Txs {
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	txs := mem.collectTxs(maxTxs, maxTxsBytes)
+	var cur int
+	txs := make([]types.Tx, 0, mem.txs.Len())
+	for e := mem.txs.Front(); e != nil; e = e.Next() {
+		memTx := e.Value.(*mempoolTx)
+		if max > 0 && cur+len(memTx.tx) > max {
+			return txs
+		}
+		cur += len(memTx.tx)
+		txs = append(txs, memTx.tx)
+	}
 	return txs
 }
 
-// maxTxs: -1 means uncapped, 0 means none
-// maxTxsBytes: -1 means uncapped
-// maxTxsBytes takes precedence over maxTxs
-func (mem *Mempool) collectTxs(maxTxs, maxTxsBytes int) types.Txs {
-	var txsBytes int
+// ReapMaxTxs reaps up to max transactions from the mempool.
+// If max is negative, there is no cap on the size of all returned
+// transactions (~ all available transactions).
+func (mem *Mempool) ReapMaxTxs(max int) types.Txs {
+	mem.proxyMtx.Lock()
+	defer mem.proxyMtx.Unlock()
 
-	if maxTxs == 0 {
-		return []types.Tx{}
+	for atomic.LoadInt32(&mem.rechecking) > 0 {
+		// TODO: Something better?
+		time.Sleep(time.Millisecond * 10)
 	}
 
-	if maxTxs == -1 {
-		maxTxs = mem.txs.Len()
-	}
-
-	txs := make([]types.Tx, 0, cmn.MinInt(mem.txs.Len(), maxTxs))
-	for e := mem.txs.Front(); e != nil && len(txs) < maxTxs; e = e.Next() {
+	txs := make([]types.Tx, 0, mem.txs.Len())
+	for e := mem.txs.Front(); e != nil && len(txs) <= max; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
-
-		if maxTxsBytes > 0 && txsBytes+len(memTx.tx) > maxTxsBytes {
-			return txs
-		}
-		txsBytes += len(memTx.tx)
-
 		txs = append(txs, memTx.tx)
 	}
 	return txs
