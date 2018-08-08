@@ -81,6 +81,8 @@ type Mempool struct {
 	recheckEnd           *clist.CElement // re-checking stops here
 	notifiedTxsAvailable bool
 	txsAvailable         chan struct{} // fires once for each height, when the mempool is not empty
+	// Filter mempool to only accept txs for which filter(tx) returns true.
+	filter func(types.Tx) bool
 
 	// Keep a cache of already-seen txs.
 	// This reduces the pressure on the proxyApp.
@@ -92,9 +94,6 @@ type Mempool struct {
 	logger log.Logger
 
 	metrics *Metrics
-
-	// Filter mempool to only accept txs for which filter(tx) returns true.
-	filter func(types.Tx) bool
 }
 
 // MempoolOption sets an optional parameter on the Mempool.
@@ -151,7 +150,9 @@ func WithMetrics(metrics *Metrics) MempoolOption {
 // SetFilter sets a filter for mempool to only accept txs for which f(tx)
 // returns true.
 func (mem *Mempool) SetFilter(f func(types.Tx) bool) {
+	mem.proxyMtx.Lock()
 	mem.filter = f
+	mem.proxyMtx.Unlock()
 }
 
 // CloseWAL closes and discards the underlying WAL file.
