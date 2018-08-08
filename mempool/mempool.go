@@ -395,6 +395,9 @@ func (mem *Mempool) ReapMaxBytes(max int) types.Txs {
 	}
 
 	var cur int
+	// TODO: we will get a performance boost if we have a good estimate of avg
+	// size per tx, and set the initial capacity based off of that.
+	// txs := make([]types.Tx, 0, cmn.MinInt(mem.txs.Len(), max/mem.avgTxSize))
 	txs := make([]types.Tx, 0, mem.txs.Len())
 	for e := mem.txs.Front(); e != nil; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
