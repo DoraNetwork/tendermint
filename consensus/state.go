@@ -156,6 +156,8 @@ func NewConsensusState(
 
 	// filter mempool txs based on consensus params
 	cs.mempool.SetFilter(func(tx types.Tx) bool {
+		cs.mtx.RLock()
+		defer cs.mtx.RUnlock()
 		return len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes
 	})
 
@@ -1336,6 +1338,8 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	// update mempool filter because consensus params might have changed
 	cs.mempool.SetFilter(func(tx types.Tx) bool {
+		cs.mtx.RLock()
+		defer cs.mtx.RUnlock()
 		return len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes
 	})
 
