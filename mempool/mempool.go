@@ -408,18 +408,21 @@ func (mem *Mempool) ReapMaxBytes(max int) types.Txs {
 }
 
 // ReapMaxTxs reaps up to max transactions from the mempool.
-// If max is negative, there is no cap on the size of all returned
-// transactions (~ all available transactions).
+// If max is negative, function panics.
 func (mem *Mempool) ReapMaxTxs(max int) types.Txs {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
+
+	if max < 0 {
+		panic("Called ReapMaxTxs with negative max")
+	}
 
 	for atomic.LoadInt32(&mem.rechecking) > 0 {
 		// TODO: Something better?
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	txs := make([]types.Tx, 0, mem.txs.Len())
+	txs := make([]types.Tx, 0, cmn.MinInt(mem.txs.Len(), max))
 	for e := mem.txs.Front(); e != nil && len(txs) <= max; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
 		txs = append(txs, memTx.tx)
