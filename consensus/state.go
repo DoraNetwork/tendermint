@@ -156,10 +156,7 @@ func NewConsensusState(
 
 	// filter mempool txs based on consensus params
 	cs.mempool.SetFilter(func(tx types.Tx) bool {
-		if len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes {
-			return true
-		}
-		return false
+		return len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes
 	})
 
 	// Don't call scheduleRound0 yet.
@@ -1339,10 +1336,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	// update mempool filter because consensus params might have changed
 	cs.mempool.SetFilter(func(tx types.Tx) bool {
-		if len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes {
-			return true
-		}
-		return false
+		return len(tx) <= cs.state.ConsensusParams.TxSize.MaxBytes
 	})
 
 	// cs.StartTime is already set.
