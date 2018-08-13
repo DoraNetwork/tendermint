@@ -32,9 +32,9 @@ https://github.com/tendermint/tendermint/blob/8a1a79257e8e8b309cd35bb1fe40bf9b33
 
 Proposed default values are:
 
-MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded symbols of chain ID)
-MaxEvidenceBytes - 4096 bytes (10 DuplicateVoteEvidence ~350 bytes each)
-MaxLastCommitBytes - 163840 (160 KB) (1000 votes ~150 bytes each)
+- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded symbols of chain ID)
+- MaxEvidenceBytes - 4096 bytes (10 DuplicateVoteEvidence ~350 bytes each)
+- MaxLastCommitBytes - 163840 (160 KB) (1000 votes ~150 bytes each)
 
 When we unmarshall a block, we calculate the sum of the four above variables
 and use the result as the total allowed limit for a block:
