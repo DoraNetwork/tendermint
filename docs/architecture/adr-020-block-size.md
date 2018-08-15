@@ -3,6 +3,7 @@
 ## Changelog
 
 13-08-2018: Initial Draft
+15-08-2018: Second version after Dev's comments
 
 ## Context
 
@@ -22,30 +23,30 @@ headers on top of the actual transactions + evidence + last commit.
 Therefore, we should
 
 1) Get rid of MaxTxs.
-2) Use MaxTxsBytes (rename to MaxDataBytes?) to limit the overall transactions size (Data).
-3) Introduce Max\* variables for header, evidence and last commit:
-  * MaxHeaderBytes
-  * MaxEvidenceBytes
-  * MaxLastCommitBytes
-4) Use these variables to limit the appropriate parts (header, evidence, ...)
-https://github.com/tendermint/tendermint/blob/8a1a79257e8e8b309cd35bb1fe40bf9b3330fd7d/types/block.go#L195
+2) Rename MaxTxsBytes to MaxBytes.
+3) Add MaxHeaderBytes cs parameter (TODO: https://github.com/tendermint/tendermint/blob/8a1a79257e8e8b309cd35bb1fe40bf9b3330fd7d/types/block.go#L195)
+4) Add MaxNumEvidences cs parameter to limit the number of evidences per block.
 
 Proposed default values are:
 
-- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded symbols of chain ID)
-- MaxEvidenceBytes - 4096 bytes (10 DuplicateVoteEvidence ~350 bytes each)
-- MaxLastCommitBytes - 163840 (160 KB) (1000 votes ~150 bytes each)
+- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded symbols of chain ID 4 bytes each in the worst case)
+- MaxNumEvidences - 10
 
-When we unmarshall a block, we calculate the sum of the four above variables
-and use the result as the total allowed limit for a block:
+When we need to ReapMaxBytes from the mempool, we calculate the upper bound as follows:
 
-```go
-_, err = cdc.UnmarshalBinaryReader(
-    cs.ProposalBlockParts.GetReader(),
-    &cs.ProposalBlock,
-    int64(MaxTxsBytes+MaxHeaderBytes+MaxEvidenceBytes+MaxLastCommitBytes),
-)
 ```
+MaxLastCommitBytes = {number of validators currently enabled} * {MaxVoteBytes}
+MaxEvidenceBytes = {MaxNumEvidences} * {MaxEvidenceBytes}
+
+mempool.ReapMaxBytes(MaxBytes - AminoOverheadForBlock - MaxLastCommitBytes - MaxEvidenceBytes - MaxHeaderBytes)
+```
+
+where MaxVoteBytes, MaxEvidenceBytes and AminoOverheadForBlock are constants defined inside the `types` package:
+
+- MaxVoteBytes - 150 bytes
+- MaxEvidenceBytes - 350 bytes
+- AminoOverheadForBlock - 16 bytes (assuming MaxHeaderBytes includes amino
+  overhead for encoding header, MaxVoteBytes - for encoding vote, etc.)
 
 ## Status
 
