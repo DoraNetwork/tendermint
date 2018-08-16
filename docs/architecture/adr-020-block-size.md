@@ -24,12 +24,10 @@ Therefore, we should
 
 1) Get rid of MaxTxs.
 2) Rename MaxTxsBytes to MaxBytes.
-3) Add MaxHeaderBytes cs parameter (TODO: https://github.com/tendermint/tendermint/blob/8a1a79257e8e8b309cd35bb1fe40bf9b3330fd7d/types/block.go#L195)
-4) Add MaxNumEvidences cs parameter to limit the number of evidences per block.
+3) Add MaxNumEvidences cs parameter to limit the number of evidences per block.
 
 Proposed default values are:
 
-- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded symbols of chain ID 4 bytes each in the worst case)
 - MaxNumEvidences - 10
 
 When we need to ReapMaxBytes from the mempool, we calculate the upper bound as follows:
@@ -41,10 +39,13 @@ MaxEvidenceBytes = {MaxNumEvidences} * {MaxEvidenceBytes}
 mempool.ReapMaxBytes(MaxBytes - AminoOverheadForBlock - MaxLastCommitBytes - MaxEvidenceBytes - MaxHeaderBytes)
 ```
 
-where MaxVoteBytes, MaxEvidenceBytes and AminoOverheadForBlock are constants defined inside the `types` package:
+where MaxVoteBytes, MaxEvidenceBytes, MaxHeaderBytes and AminoOverheadForBlock
+are constants defined inside the `types` package:
 
 - MaxVoteBytes - 150 bytes
 - MaxEvidenceBytes - 350 bytes
+- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded
+  symbols of chain ID 4 bytes each in the worst case + amino overhead)
 - AminoOverheadForBlock - 16 bytes (assuming MaxHeaderBytes includes amino
   overhead for encoding header, MaxVoteBytes - for encoding vote, etc.)
 
@@ -61,6 +62,6 @@ Proposed.
 
 ### Negative
 
-* Neccessity to configure 3 additional variables
+* Neccessity to configure additional variables
 
 ### Neutral
