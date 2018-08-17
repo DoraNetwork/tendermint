@@ -377,7 +377,7 @@ func makeParams(txsBytes, blockGas, txBytes, txGas, partSize int) types.Consensu
 	return types.ConsensusParams{
 		BlockSize: types.BlockSize{
 			MaxBytes: txsBytes,
-			MaxGas:      int64(blockGas),
+			MaxGas:   int64(blockGas),
 		},
 		TxSize: types.TxSize{
 			MaxBytes: txBytes,
@@ -414,7 +414,7 @@ func TestApplyUpdates(t *testing.T) {
 			abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
 					MaxBytes: 1,
-					MaxGas:      55,
+					MaxGas:   55,
 				},
 			},
 			makeParams(1, 55, 3, 4, 5)},

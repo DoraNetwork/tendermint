@@ -112,6 +112,13 @@ func validateBlock(stateDB dbm.DB, state State, block *types.Block) error {
 		}
 	}
 
+	if len(block.Evidence.Evidence) > state.ConsensusParams.BlockSize.MaxNumEvidences {
+		return fmt.Errorf("Block.Evidence is too big.  Max length is %X, got %v items",
+			state.ConsensusParams.BlockSize.MaxNumEvidences,
+			len(block.Evidence.Evidence),
+		)
+	}
+
 	// Validate all evidence.
 	// TODO: Each check requires loading an old validator set.
 	// We should cap the amount of evidence per block

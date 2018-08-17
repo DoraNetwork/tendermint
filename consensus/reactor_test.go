@@ -194,9 +194,9 @@ func newMockEvidencePool(val []byte) *mockEvidencePool {
 	}
 }
 
-func (m *mockEvidencePool) PendingEvidence() []types.Evidence {
+func (m *mockEvidencePool) PendingEvidence(limit int) []types.Evidence {
 	if m.height > 0 {
-		return m.ev
+		return m.ev[:cmn.MinInt(len(m.ev), limit)]
 	}
 	return nil
 }
@@ -207,7 +207,7 @@ func (m *mockEvidencePool) Update(block *types.Block, state sm.State) {
 			panic("block has no evidence")
 		}
 	}
-	m.height += 1
+	m.height++
 }
 
 //------------------------------------

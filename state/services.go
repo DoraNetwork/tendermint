@@ -75,7 +75,7 @@ type BlockStore interface {
 
 // EvidencePool defines the EvidencePool interface used by the ConsensusState.
 type EvidencePool interface {
-	PendingEvidence() []types.Evidence
+	PendingEvidence(limit int) []types.Evidence
 	AddEvidence(types.Evidence) error
 	Update(*types.Block, State)
 }
@@ -84,6 +84,6 @@ type EvidencePool interface {
 type MockEvidencePool struct {
 }
 
-func (m MockEvidencePool) PendingEvidence() []types.Evidence { return nil }
-func (m MockEvidencePool) AddEvidence(types.Evidence) error  { return nil }
-func (m MockEvidencePool) Update(*types.Block, State)        {}
+func (m MockEvidencePool) PendingEvidence(limit int) []types.Evidence { return nil }
+func (m MockEvidencePool) AddEvidence(types.Evidence) error           { return nil }
+func (m MockEvidencePool) Update(*types.Block, State)                 {}

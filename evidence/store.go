@@ -3,6 +3,7 @@ package evidence
 import (
 	"fmt"
 
+	cmn "github.com/tendermint/tendermint/libs/common"
 	dbm "github.com/tendermint/tendermint/libs/db"
 	"github.com/tendermint/tendermint/types"
 )
@@ -87,8 +88,9 @@ func (store *EvidenceStore) PriorityEvidence() (evidence []types.Evidence) {
 }
 
 // PendingEvidence returns all known uncommitted evidence.
-func (store *EvidenceStore) PendingEvidence() (evidence []types.Evidence) {
-	return store.ListEvidence(baseKeyPending)
+func (store *EvidenceStore) PendingEvidence(limit int) (evidence []types.Evidence) {
+	l := store.ListEvidence(baseKeyPending)
+	return l[:cmn.MinInt(len(l), limit)]
 }
 
 // ListEvidence lists the evidence for the given prefix key.
