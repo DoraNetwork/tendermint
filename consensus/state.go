@@ -1461,13 +1461,10 @@ func (cs *ConsensusState) addProposalBlockPart(msg *BlockPartMessage, peerID p2p
 	}
 	if added && cs.ProposalBlockParts.IsComplete() {
 		// Added and completed!
-		maxDataSize := cs.state.ConsensusParams.BlockSize.MaxBytes
-		// header + evidence + last commit
-		const maxOtherPartsSize = 5000000 // 5 MB
 		_, err = cdc.UnmarshalBinaryReader(
 			cs.ProposalBlockParts.GetReader(),
 			&cs.ProposalBlock,
-			int64(maxDataSize+maxOtherPartsSize),
+			int64(cs.state.ConsensusParams.BlockSize.MaxBytes),
 		)
 		if err != nil {
 			return true, err
