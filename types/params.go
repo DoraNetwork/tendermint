@@ -22,7 +22,7 @@ type ConsensusParams struct {
 
 // BlockSize contain limits on the block size.
 type BlockSize struct {
-	MaxTxsBytes int   `json:"max_txs_bytes"` // NOTE: must not be 0 nor greater than 100MB
+	MaxBytes int   `json:"max_txs_bytes"` // NOTE: must not be 0 nor greater than 100MB
 	MaxGas      int64 `json:"max_gas"`
 }
 
@@ -55,7 +55,7 @@ func DefaultConsensusParams() *ConsensusParams {
 // DefaultBlockSize returns a default BlockSize.
 func DefaultBlockSize() BlockSize {
 	return BlockSize{
-		MaxTxsBytes: 22020096, // 21MB
+		MaxBytes: 22020096, // 21MB
 		MaxGas:      -1,
 	}
 }
@@ -86,17 +86,17 @@ func DefaultEvidenceParams() EvidenceParams {
 // are within their allowed limits, and returns an error if they are not.
 func (params *ConsensusParams) Validate() error {
 	// ensure some values are greater than 0
-	if params.BlockSize.MaxTxsBytes <= 0 {
-		return cmn.NewError("BlockSize.MaxTxsBytes must be greater than 0. Got %d", params.BlockSize.MaxTxsBytes)
+	if params.BlockSize.MaxBytes <= 0 {
+		return cmn.NewError("BlockSize.MaxBytes must be greater than 0. Got %d", params.BlockSize.MaxBytes)
 	}
 	if params.BlockGossip.BlockPartSizeBytes <= 0 {
 		return cmn.NewError("BlockGossip.BlockPartSizeBytes must be greater than 0. Got %d", params.BlockGossip.BlockPartSizeBytes)
 	}
 
 	// ensure blocks aren't too big
-	if params.BlockSize.MaxTxsBytes > MaxBlockSizeBytes {
-		return cmn.NewError("BlockSize.MaxTxsBytes is too big. %d > %d",
-			params.BlockSize.MaxTxsBytes, MaxBlockSizeBytes)
+	if params.BlockSize.MaxBytes > MaxBlockSizeBytes {
+		return cmn.NewError("BlockSize.MaxBytes is too big. %d > %d",
+			params.BlockSize.MaxBytes, MaxBlockSizeBytes)
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func (params *ConsensusParams) Validate() error {
 func (params *ConsensusParams) Hash() []byte {
 	return merkle.SimpleHashFromMap(map[string]merkle.Hasher{
 		"block_gossip_part_size_bytes": aminoHasher(params.BlockGossip.BlockPartSizeBytes),
-		"block_size_max_txs_bytes":     aminoHasher(params.BlockSize.MaxTxsBytes),
+		"block_size_max_txs_bytes":     aminoHasher(params.BlockSize.MaxBytes),
 		"block_size_max_gas":           aminoHasher(params.BlockSize.MaxGas),
 		"tx_size_max_bytes":            aminoHasher(params.TxSize.MaxBytes),
 		"tx_size_max_gas":              aminoHasher(params.TxSize.MaxGas),
@@ -126,8 +126,8 @@ func (params ConsensusParams) Update(params2 *abci.ConsensusParams) ConsensusPar
 	// XXX: it's cast city over here. It's ok because we only do int32->int
 	// but still, watch it champ.
 	if params2.BlockSize != nil {
-		if params2.BlockSize.MaxTxsBytes > 0 {
-			res.BlockSize.MaxTxsBytes = int(params2.BlockSize.MaxTxsBytes)
+		if params2.BlockSize.MaxBytes > 0 {
+			res.BlockSize.MaxBytes = int(params2.BlockSize.MaxBytes)
 		}
 		if params2.BlockSize.MaxGas > 0 {
 			res.BlockSize.MaxGas = params2.BlockSize.MaxGas

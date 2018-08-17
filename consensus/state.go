@@ -954,10 +954,11 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 	}
 
 	// Mempool validated transactions
-	txs := cs.mempool.ReapMaxBytes(cs.state.ConsensusParams.BlockSize.MaxTxsBytes)
+	txs := cs.mempool.ReapMaxBytes(cs.state.ConsensusParams.BlockSize.MaxBytes)
 	evidence := cs.evpool.PendingEvidence()
 	proposerAddr := cs.privValidator.GetAddress()
 	block, parts := cs.state.MakeBlock(cs.Height, txs, commit, evidence, proposerAddr)
+
 	return block, parts
 }
 
@@ -1452,7 +1453,7 @@ func (cs *ConsensusState) addProposalBlockPart(msg *BlockPartMessage, peerID p2p
 	}
 	if added && cs.ProposalBlockParts.IsComplete() {
 		// Added and completed!
-		maxDataSize := cs.state.ConsensusParams.BlockSize.MaxTxsBytes
+		maxDataSize := cs.state.ConsensusParams.BlockSize.MaxBytes
 		// header + evidence + last commit
 		const maxOtherPartsSize = 5000000 // 5 MB
 		_, err = cdc.UnmarshalBinaryReader(

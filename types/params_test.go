@@ -11,7 +11,7 @@ import (
 
 func newConsensusParams(txsBytes, partSize int) ConsensusParams {
 	return ConsensusParams{
-		BlockSize:   BlockSize{MaxTxsBytes: txsBytes},
+		BlockSize:   BlockSize{MaxBytes: txsBytes},
 		BlockGossip: BlockGossip{BlockPartSizeBytes: partSize},
 	}
 }
@@ -45,7 +45,7 @@ func TestConsensusParamsValidation(t *testing.T) {
 func makeParams(txsBytes, blockGas, txBytes, txGas, partSize int) ConsensusParams {
 	return ConsensusParams{
 		BlockSize: BlockSize{
-			MaxTxsBytes: txsBytes,
+			MaxBytes: txsBytes,
 			MaxGas:      int64(blockGas),
 		},
 		TxSize: TxSize{
@@ -98,7 +98,7 @@ func TestConsensusParamsUpdate(t *testing.T) {
 			makeParams(1, 2, 3, 4, 5),
 			&abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxTxsBytes: -100,
+					MaxBytes: -100,
 					MaxGas:      -200,
 				},
 				TxSize: &abci.TxSize{
@@ -116,7 +116,7 @@ func TestConsensusParamsUpdate(t *testing.T) {
 			makeParams(1, 2, 3, 4, 5),
 			&abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxTxsBytes: 100,
+					MaxBytes: 100,
 					MaxGas:      200,
 				},
 				TxSize: &abci.TxSize{

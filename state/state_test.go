@@ -328,7 +328,7 @@ func TestConsensusParamsChangesSaveLoad(t *testing.T) {
 	params[0] = state.ConsensusParams
 	for i := 1; i < N+1; i++ {
 		params[i] = *types.DefaultConsensusParams()
-		params[i].BlockSize.MaxTxsBytes += i
+		params[i].BlockSize.MaxBytes += i
 	}
 
 	// Build the params history by running updateState
@@ -376,7 +376,7 @@ func TestConsensusParamsChangesSaveLoad(t *testing.T) {
 func makeParams(txsBytes, blockGas, txBytes, txGas, partSize int) types.ConsensusParams {
 	return types.ConsensusParams{
 		BlockSize: types.BlockSize{
-			MaxTxsBytes: txsBytes,
+			MaxBytes: txsBytes,
 			MaxGas:      int64(blockGas),
 		},
 		TxSize: types.TxSize{
@@ -413,7 +413,7 @@ func TestApplyUpdates(t *testing.T) {
 		3: {initParams,
 			abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxTxsBytes: 1,
+					MaxBytes: 1,
 					MaxGas:      55,
 				},
 			},
@@ -421,7 +421,7 @@ func TestApplyUpdates(t *testing.T) {
 		4: {initParams,
 			abci.ConsensusParams{
 				BlockSize: &abci.BlockSize{
-					MaxTxsBytes: 1,
+					MaxBytes: 1,
 				},
 				TxSize: &abci.TxSize{
 					MaxGas: 888,
