@@ -13,6 +13,14 @@ import (
 	cmn "github.com/tendermint/tendermint/libs/common"
 )
 
+const (
+	// MaxHeaderBytes is a maximum header size (including amino overhead).
+	MaxHeaderBytes = 476
+
+	// AminoOverheadForBlock - amino overhead to encode the block (whole block + data field).
+	AminoOverheadForBlock = 5
+)
+
 // Block defines the atomic unit of a Tendermint blockchain.
 // TODO: add Version byte
 type Block struct {

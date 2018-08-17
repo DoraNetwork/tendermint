@@ -42,11 +42,11 @@ mempool.ReapMaxBytes(MaxBytes - AminoOverheadForBlock - MaxLastCommitBytes - Max
 where MaxVoteBytes, MaxEvidenceBytes, MaxHeaderBytes and AminoOverheadForBlock
 are constants defined inside the `types` package:
 
-- MaxVoteBytes - 150 bytes
-- MaxEvidenceBytes - 350 bytes
-- MaxHeaderBytes - 512 bytes (~200 bytes hashes + 200 bytes - 50 UTF-8 encoded
+- MaxVoteBytes - 170 bytes
+- MaxEvidenceBytes - 364 bytes
+- MaxHeaderBytes - 476 bytes (~276 bytes hashes + 200 bytes - 50 UTF-8 encoded
   symbols of chain ID 4 bytes each in the worst case + amino overhead)
-- AminoOverheadForBlock - 16 bytes (assuming MaxHeaderBytes includes amino
+- AminoOverheadForBlock - 5 bytes (assuming MaxHeaderBytes includes amino
   overhead for encoding header, MaxVoteBytes - for encoding vote, etc.)
 
 ## Status

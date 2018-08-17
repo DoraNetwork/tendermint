@@ -954,12 +954,20 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 	}
 
 	// Mempool validated transactions
-	txs := cs.mempool.ReapMaxBytes(cs.state.ConsensusParams.BlockSize.MaxBytes)
+	txs := cs.mempool.ReapMaxBytes(maxDataBytes(cs.state.Validators.Size(), &cs.state.ConsensusParams.BlockSize))
 	evidence := cs.evpool.PendingEvidence(cs.state.ConsensusParams.BlockSize.MaxNumEvidences)
 	proposerAddr := cs.privValidator.GetAddress()
 	block, parts := cs.state.MakeBlock(cs.Height, txs, commit, evidence, proposerAddr)
 
 	return block, parts
+}
+
+// maxDataBytes calculates maximum size of the block's data
+func maxDataBytes(valsCount int, blockSize *types.BlockSize) int {
+	maxLastCommitBytes := valsCount * types.MaxVoteBytes
+	maxEvidenceBytes := blockSize.MaxNumEvidences * types.MaxEvidenceBytes
+	allBlockPartsExceptData := types.MaxHeaderBytes - maxLastCommitBytes - maxEvidenceBytes
+	return blockSize.MaxBytes - allBlockPartsExceptData
 }
 
 // Enter: `timeoutPropose` after entering Propose.
