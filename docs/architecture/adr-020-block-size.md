@@ -4,6 +4,7 @@
 
 13-08-2018: Initial Draft
 15-08-2018: Second version after Dev's comments
+28-08-2018: Third version after Ethan's comments
 
 ## Context
 
@@ -24,19 +25,15 @@ Therefore, we should
 
 1) Get rid of MaxTxs.
 2) Rename MaxTxsBytes to MaxBytes.
-3) Add MaxNumEvidences cs parameter to limit the number of evidences per block.
-
-Proposed default values are:
-
-- MaxNumEvidences - 10
 
 When we need to ReapMaxBytes from the mempool, we calculate the upper bound as follows:
 
 ```
-MaxLastCommitBytes = {number of validators currently enabled} * {MaxVoteBytes}
-MaxEvidenceBytes = {MaxNumEvidences} * {MaxEvidenceBytes}
+ExactLastCommitBytes = {number of validators currently enabled} * {MaxVoteBytes}
+MaxEvidenceBytesPerBlock = MaxBytes / 10
+ExactEvidenceBytes = cs.evpool.PendingEvidence(MaxEvidenceBytesPerBlock) * MaxEvidenceBytes
 
-mempool.ReapMaxBytes(MaxBytes - AminoOverheadForBlock - MaxLastCommitBytes - MaxEvidenceBytes - MaxHeaderBytes)
+mempool.ReapMaxBytes(MaxBytes - AminoOverheadForBlock - ExactLastCommitBytes - ExactEvidenceBytes - MaxHeaderBytes)
 ```
 
 where MaxVoteBytes, MaxEvidenceBytes, MaxHeaderBytes and AminoOverheadForBlock
@@ -49,6 +46,9 @@ are constants defined inside the `types` package:
 - AminoOverheadForBlock - 5 bytes (assuming MaxHeaderBytes includes amino
   overhead for encoding header, MaxVoteBytes - for encoding vote, etc.)
 
+We should write a test that fails if the underlying structs got changed, but
+MaxXXX stayed the same.
+
 ## Status
 
 Proposed.
@@ -58,10 +58,10 @@ Proposed.
 ### Positive
 
 * one way to limit the size of a block
-* more granular control over the size of block parts (header, evidence, ...)
+* less variables to configure
 
 ### Negative
 
-* Neccessity to configure additional variables
+* constants that need to be adjusted if the underlying structs got changed
 
 ### Neutral
