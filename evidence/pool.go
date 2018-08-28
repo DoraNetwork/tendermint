@@ -57,9 +57,10 @@ func (evpool *EvidencePool) PriorityEvidence() []types.Evidence {
 	return evpool.evidenceStore.PriorityEvidence()
 }
 
-// PendingEvidence returns all uncommitted evidence.
-func (evpool *EvidencePool) PendingEvidence(limit int) []types.Evidence {
-	return evpool.evidenceStore.PendingEvidence(limit)
+// PendingEvidence returns uncommitted evidence up to maxBytes.
+// If maxBytes is -1, all evidence is returned.
+func (evpool *EvidencePool) PendingEvidence(maxBytes int) []types.Evidence {
+	return evpool.evidenceStore.PendingEvidence(maxBytes)
 }
 
 // State returns the current state of the evpool.

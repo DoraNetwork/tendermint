@@ -194,9 +194,10 @@ func newMockEvidencePool(val []byte) *mockEvidencePool {
 	}
 }
 
-func (m *mockEvidencePool) PendingEvidence(limit int) []types.Evidence {
+// NOTE: maxBytes is ignored
+func (m *mockEvidencePool) PendingEvidence(maxBytes int) []types.Evidence {
 	if m.height > 0 {
-		return m.ev[:cmn.MinInt(len(m.ev), limit)]
+		return m.ev
 	}
 	return nil
 }

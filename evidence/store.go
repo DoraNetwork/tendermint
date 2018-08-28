@@ -3,7 +3,6 @@ package evidence
 import (
 	"fmt"
 
-	cmn "github.com/tendermint/tendermint/libs/common"
 	dbm "github.com/tendermint/tendermint/libs/db"
 	"github.com/tendermint/tendermint/types"
 )
@@ -79,7 +78,7 @@ func NewEvidenceStore(db dbm.DB) *EvidenceStore {
 // PriorityEvidence returns the evidence from the outqueue, sorted by highest priority.
 func (store *EvidenceStore) PriorityEvidence() (evidence []types.Evidence) {
 	// reverse the order so highest priority is first
-	l := store.ListEvidence(baseKeyOutqueue)
+	l := store.ListEvidence(baseKeyOutqueue, -1)
 	l2 := make([]types.Evidence, len(l))
 	for i := range l {
 		l2[i] = l[len(l)-1-i]
@@ -87,18 +86,25 @@ func (store *EvidenceStore) PriorityEvidence() (evidence []types.Evidence) {
 	return l2
 }
 
-// PendingEvidence returns all known uncommitted evidence.
-func (store *EvidenceStore) PendingEvidence(limit int) (evidence []types.Evidence) {
-	l := store.ListEvidence(baseKeyPending)
-	return l[:cmn.MinInt(len(l), limit)]
+// PendingEvidence returns known uncommitted evidence up to maxBytes.
+// If maxBytes is -1, all evidence is returned.
+func (store *EvidenceStore) PendingEvidence(maxBytes int) (evidence []types.Evidence) {
+	return store.ListEvidence(baseKeyPending, maxBytes)
 }
 
-// ListEvidence lists the evidence for the given prefix key.
+// ListEvidence lists the evidence for the given prefix key up to maxBytes.
 // It is wrapped by PriorityEvidence and PendingEvidence for convenience.
-func (store *EvidenceStore) ListEvidence(prefixKey string) (evidence []types.Evidence) {
+// If maxBytes is -1, there's no cap on the size of returned evidence.
+func (store *EvidenceStore) ListEvidence(prefixKey string, maxBytes int) (evidence []types.Evidence) {
+	var bytes int
 	iter := dbm.IteratePrefix(store.db, []byte(prefixKey))
 	for ; iter.Valid(); iter.Next() {
 		val := iter.Value()
+
+		if maxBytes > 0 && bytes+len(val) > maxBytes {
+			return evidence
+		}
+		bytes += len(val)
 
 		var ei EvidenceInfo
 		err := cdc.UnmarshalBinaryBare(val, &ei)
