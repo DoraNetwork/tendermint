@@ -57,8 +57,6 @@ var (
 	ErrMempoolIsFull = errors.New("Mempool is full")
 )
 
-// type Filter func(types.Tx) bool
-
 // TxID is the hex encoded hash of the bytes as a types.Tx.
 func TxID(tx []byte) string {
 	return fmt.Sprintf("%X", types.Tx(tx).Hash())
@@ -142,17 +140,17 @@ func (mem *Mempool) SetLogger(l log.Logger) {
 	mem.logger = l
 }
 
-// WithMetrics sets the metrics.
-func WithMetrics(metrics *Metrics) MempoolOption {
-	return func(mem *Mempool) { mem.metrics = metrics }
-}
-
 // SetFilter sets a filter for mempool to only accept txs for which f(tx)
 // returns true.
 func (mem *Mempool) SetFilter(f func(types.Tx) bool) {
 	mem.proxyMtx.Lock()
 	mem.filter = f
 	mem.proxyMtx.Unlock()
+}
+
+// WithMetrics sets the metrics.
+func WithMetrics(metrics *Metrics) MempoolOption {
+	return func(mem *Mempool) { mem.metrics = metrics }
 }
 
 // CloseWAL closes and discards the underlying WAL file.
@@ -436,7 +434,7 @@ func (mem *Mempool) ReapMaxTxs(max int) types.Txs {
 // Update informs the mempool that the given txs were committed and can be discarded.
 // NOTE: this should be called *after* block is committed by consensus.
 // NOTE: unsafe; Lock/Unlock must be managed by caller
-func (mem *Mempool) Update(height int64, txs types.Txs) error {
+func (mem *Mempool) Update(height int64, txs types.Txs, filter func(types.Tx) bool) error {
 	// First, create a lookup map of txns in new txs.
 	txsMap := make(map[string]struct{}, len(txs))
 	for _, tx := range txs {
@@ -446,6 +444,10 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	// Set height
 	mem.height = height
 	mem.notifiedTxsAvailable = false
+
+	if filter != nil {
+		mem.filter = filter
+	}
 
 	// Remove transactions that are already in txs.
 	goodTxs := mem.filterTxs(txsMap)
@@ -459,7 +461,10 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		// mem.recheckCursor re-scans mem.txs and possibly removes some txs.
 		// Before mem.Reap(), we should wait for mem.recheckCursor to be nil.
 	}
+
+	// Update metrics
 	mem.metrics.Size.Set(float64(mem.Size()))
+
 	return nil
 }
 

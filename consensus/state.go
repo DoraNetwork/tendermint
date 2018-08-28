@@ -154,12 +154,6 @@ func NewConsensusState(
 
 	cs.updateToState(state)
 
-	// filter mempool txs based on consensus params
-	maxBytes := cs.state.ConsensusParams.TxSize.MaxBytes
-	cs.mempool.SetFilter(func(tx types.Tx) bool {
-		return len(tx) <= maxBytes
-	})
-
 	// Don't call scheduleRound0 yet.
 	// We do that upon Start().
 	cs.reconstructLastCommit(state)
@@ -1345,13 +1339,6 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	cs.updateToState(stateCopy)
 
 	fail.Fail() // XXX
-
-	// update mempool filter because consensus params might have changed
-	// TODO: check if consensus params were actually changed
-	maxBytes := cs.state.ConsensusParams.TxSize.MaxBytes
-	cs.mempool.SetFilter(func(tx types.Tx) bool {
-		return len(tx) <= maxBytes
-	})
 
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.

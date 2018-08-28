@@ -23,31 +23,27 @@ type Mempool interface {
 	Size() int
 	CheckTx(types.Tx, func(*abci.Response)) error
 	ReapMaxBytes(max int) types.Txs
-	Update(height int64, txs types.Txs) error
+	Update(height int64, txs types.Txs, filter func(types.Tx) bool) error
 	Flush()
 	FlushAppConn() error
 
 	TxsAvailable() <-chan struct{}
 	EnableTxsAvailable()
-
-	SetFilter(func(types.Tx) bool)
 }
 
 // MockMempool is an empty implementation of a Mempool, useful for testing.
-type MockMempool struct {
-}
+type MockMempool struct{}
 
-func (MockMempool) Lock()                                              {}
-func (MockMempool) Unlock()                                            {}
-func (MockMempool) Size() int                                          { return 0 }
-func (MockMempool) CheckTx(tx types.Tx, cb func(*abci.Response)) error { return nil }
-func (MockMempool) ReapMaxBytes(max int) types.Txs                     { return types.Txs{} }
-func (MockMempool) Update(height int64, txs types.Txs) error           { return nil }
-func (MockMempool) Flush()                                             {}
-func (MockMempool) FlushAppConn() error                                { return nil }
-func (MockMempool) TxsAvailable() <-chan struct{}                      { return make(chan struct{}) }
-func (MockMempool) EnableTxsAvailable()                                {}
-func (MockMempool) SetFilter(func(types.Tx) bool)                      {}
+func (MockMempool) Lock()                                                                {}
+func (MockMempool) Unlock()                                                              {}
+func (MockMempool) Size() int                                                            { return 0 }
+func (MockMempool) CheckTx(tx types.Tx, cb func(*abci.Response)) error                   { return nil }
+func (MockMempool) ReapMaxBytes(max int) types.Txs                                       { return types.Txs{} }
+func (MockMempool) Update(height int64, txs types.Txs, filter func(types.Tx) bool) error { return nil }
+func (MockMempool) Flush()                                                               {}
+func (MockMempool) FlushAppConn() error                                                  { return nil }
+func (MockMempool) TxsAvailable() <-chan struct{}                                        { return make(chan struct{}) }
+func (MockMempool) EnableTxsAvailable()                                                  {}
 
 //------------------------------------------------------
 // blockstore
