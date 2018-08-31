@@ -18,6 +18,7 @@ import (
 	"github.com/tendermint/tendermint/p2p"
 	sm "github.com/tendermint/tendermint/state"
 	"github.com/tendermint/tendermint/types"
+	mempoolR "github.com/tendermint/tendermint/mempool"
 )
 
 const (
@@ -40,6 +41,9 @@ type ConsensusReactor struct {
 	mtx      sync.RWMutex
 	fastSync bool
 	eventBus *types.EventBus
+
+	pmtx	sync.RWMutex
+	peers  map[string]*p2p.Peer
 }
 
 // NewConsensusReactor returns a new ConsensusReactor with the given consensusState.
@@ -49,6 +53,7 @@ func NewConsensusReactor(consensusState *ConsensusState, fastSync bool) *Consens
 		fastSync: fastSync,
 	}
 	conR.BaseReactor = *p2p.NewBaseReactor("ConsensusReactor", conR)
+	conR.peers = make(map[string]*p2p.Peer)
 	return conR
 }
 
@@ -71,7 +76,35 @@ func (conR *ConsensusReactor) OnStart() error {
 		}
 	}
 
+	go conR.broadcastGetTxRoutine()
+
 	return nil
+}
+
+// broadcastGetTxRoutine broadcast GetTxMessage to remote peer
+// Note: Send GetTxMessage should be in mempool/reactor,
+//       but it can not get the peer which contain the tx, so put it here, not good
+func (conR *ConsensusReactor) broadcastGetTxRoutine() {
+	for {
+		select {
+		case fetching := <- conR.conS.mempool.TxsFetching():
+			conR.Logger.Info("broadcastGetTxRoutine fetching hash", fetching)
+			msg := &mempoolR.GetTxMessage{Hash: fetching}
+			for _, peer := range conR.peers {
+				rs := conR.conS.GetRoundState()
+				ps := (*peer).Get(types.PeerStateKey).(*PeerState)
+				// send GetTxMessage to have proposalBlock one
+				if rs.ProposalBlockParts.HasHeader(ps.ProposalBlockPartsHeader) {
+					conR.Logger.Info("broadcastGetTxRoutine Send GetTxMessage to peer", (*peer).Key())
+					success := (*peer).Send(mempoolR.MempoolChannel,
+						struct{ mempoolR.MempoolMessage }{msg})
+					if !success {
+						conR.Logger.Error("consensus send GetTxMessage not success")
+					}
+				}
+			}
+		}
+	}
 }
 
 // OnStop implements BaseService
@@ -139,6 +172,12 @@ func (conR *ConsensusReactor) AddPeer(peer p2p.Peer) {
 		return
 	}
 
+	conR.pmtx.Lock()
+	if _, ok := conR.peers[peer.Key()]; !ok {
+		conR.peers[peer.Key()] = &peer
+	}
+	conR.pmtx.Unlock()
+
 	// Create peerState for peer
 	peerState := NewPeerState(peer).SetLogger(conR.Logger)
 	peer.Set(types.PeerStateKey, peerState)
@@ -160,6 +199,11 @@ func (conR *ConsensusReactor) RemovePeer(peer p2p.Peer, reason interface{}) {
 	if !conR.IsRunning() {
 		return
 	}
+	conR.pmtx.Lock()
+	if _, ok := conR.peers[peer.Key()]; ok {
+		delete(conR.peers, peer.Key())
+	}
+	conR.pmtx.Unlock()
 	// TODO
 	//peer.Get(PeerStateKey).(*PeerState).Disconnect()
 }
@@ -246,6 +290,9 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 		case *ProposalPOLMessage:
 			ps.ApplyProposalPOLMessage(msg)
 		case *BlockPartMessage:
+			ps.SetHasProposalBlockPart(msg.Height, msg.Round, msg.Part.Index)
+			conR.conS.peerMsgQueue <- msgInfo{msg, src.Key()}
+		case *CMPCTBlockPartMessage:
 			ps.SetHasProposalBlockPart(msg.Height, msg.Round, msg.Part.Index)
 			conR.conS.peerMsgQueue <- msgInfo{msg, src.Key()}
 		default:
@@ -473,17 +520,29 @@ OUTER_LOOP:
 		prs := ps.GetRoundState()
 
 		// Send proposal Block parts?
+		// If proposalBlockParts has header, send proposalCMPCTBlockParts
 		if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
 			if index, ok := rs.ProposalBlockParts.BitArray().Sub(prs.ProposalBlockParts.Copy()).PickRandom(); ok {
 				part := rs.ProposalBlockParts.GetPart(index)
-				msg := &BlockPartMessage{
-					Height: rs.Height, // This tells peer that this part applies to us.
-					Round:  rs.Round,  // This tells peer that this part applies to us.
-					Part:   part,
-				}
 				logger.Debug("Sending block part", "height", prs.Height, "round", prs.Round)
-				if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
-					ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+				if (compactBlock) {
+					msg := &CMPCTBlockPartMessage{
+						Height: rs.Height, // This tells peer that this part applies to us.
+						Round:  rs.Round,  // This tells peer that this part applies to us.
+						Part:   part,
+					}
+					if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
+						ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+					}
+				} else {
+					msg := &BlockPartMessage{
+						Height: rs.Height, // This tells peer that this part applies to us.
+						Round:  rs.Round,  // This tells peer that this part applies to us.
+						Part:   part,
+					}
+					if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
+						ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+					}
 				}
 				continue OUTER_LOOP
 			}
@@ -910,6 +969,18 @@ func (ps *PeerState) SetHasProposalBlockPart(height int64, round int, index int)
 	ps.ProposalBlockParts.SetIndex(index, true)
 }
 
+// SetHasProposalCMPCTBlockPart sets the given block part index as known for the peer.
+func (ps *PeerState) SetHasProposalCMPCTBlockPart(height int64, round int, index int) {
+	ps.mtx.Lock()
+	defer ps.mtx.Unlock()
+
+	if ps.Height != height || ps.Round != round {
+		return
+	}
+
+	ps.ProposalCMPCTBlockParts.SetIndex(index, true)
+}
+
 // PickSendVote picks a vote and sends it to the peer.
 // Returns true if vote was sent.
 func (ps *PeerState) PickSendVote(votes types.VoteSetReader) bool {
@@ -1209,15 +1280,16 @@ func (ps *PeerState) StringIndented(indent string) string {
 // Messages
 
 const (
-	msgTypeNewRoundStep = byte(0x01)
-	msgTypeCommitStep   = byte(0x02)
-	msgTypeProposal     = byte(0x11)
-	msgTypeProposalPOL  = byte(0x12)
-	msgTypeBlockPart    = byte(0x13) // both block & POL
-	msgTypeVote         = byte(0x14)
-	msgTypeHasVote      = byte(0x15)
-	msgTypeVoteSetMaj23 = byte(0x16)
-	msgTypeVoteSetBits  = byte(0x17)
+	msgTypeNewRoundStep    = byte(0x01)
+	msgTypeCommitStep      = byte(0x02)
+	msgTypeProposal        = byte(0x11)
+	msgTypeProposalPOL     = byte(0x12)
+	msgTypeBlockPart       = byte(0x13) // both block & POL
+	msgTypeVote            = byte(0x14)
+	msgTypeHasVote         = byte(0x15)
+	msgTypeVoteSetMaj23    = byte(0x16)
+	msgTypeVoteSetBits     = byte(0x17)
+	msgTypeCMPCTBlockPart  = byte(0x18)
 
 	msgTypeProposalHeartbeat = byte(0x20)
 )
@@ -1232,6 +1304,7 @@ var _ = wire.RegisterInterface(
 	wire.ConcreteType{&ProposalMessage{}, msgTypeProposal},
 	wire.ConcreteType{&ProposalPOLMessage{}, msgTypeProposalPOL},
 	wire.ConcreteType{&BlockPartMessage{}, msgTypeBlockPart},
+	wire.ConcreteType{&CMPCTBlockPartMessage{}, msgTypeCMPCTBlockPart},
 	wire.ConcreteType{&VoteMessage{}, msgTypeVote},
 	wire.ConcreteType{&HasVoteMessage{}, msgTypeHasVote},
 	wire.ConcreteType{&VoteSetMaj23Message{}, msgTypeVoteSetMaj23},
@@ -1312,6 +1385,14 @@ func (m *ProposalPOLMessage) String() string {
 
 // BlockPartMessage is sent when gossipping a piece of the proposed block.
 type BlockPartMessage struct {
+	Height int64
+	Round  int
+	Part   *types.Part
+}
+
+// CMPCTBlockPartMessage is sent when gossipping a piece of the proposed cmpct block.
+// cmpct block contains tx hash but not tx data
+type CMPCTBlockPartMessage struct {
 	Height int64
 	Round  int
 	Part   *types.Part

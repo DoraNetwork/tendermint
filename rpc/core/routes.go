@@ -28,7 +28,7 @@ var Routes = map[string]*rpc.RPCFunc{
 
 	// broadcast API
 	"broadcast_tx_commit": rpc.NewRPCFunc(BroadcastTxCommit, "tx"),
-	"broadcast_tx_sync":   rpc.NewRPCFunc(BroadcastTxSync, "tx"),
+	"broadcast_tx_sync":   rpc.NewRPCFunc(BroadcastTxSync, "tx,txtype"),
 	"broadcast_tx_async":  rpc.NewRPCFunc(BroadcastTxAsync, "tx"),
 
 	// abci API

@@ -19,6 +19,9 @@ import (
 	cstypes "github.com/tendermint/tendermint/consensus/types"
 	sm "github.com/tendermint/tendermint/state"
 	"github.com/tendermint/tendermint/types"
+	data "github.com/tendermint/go-wire/data"
+
+	emtConfig "github.com/dora/ultron/node/config"
 )
 
 //-----------------------------------------------------------------------------
@@ -42,6 +45,9 @@ var (
 
 var (
 	msgQueueSize = 1000
+	compactBlock = true
+	buildFullBlock = false	// use compact block build full block with raw tx
+	broadcastPtxHash = true
 )
 
 // msgs from the reactor which may update the state
@@ -104,6 +110,9 @@ type ConsensusState struct {
 	// for tests where we want to limit the number of transitions the state makes
 	nSteps int
 
+	// for store the height when addProposalCMPCTBlock
+	cmpctBlockHeight int64
+
 	// some functions can be overwritten for testing
 	decideProposal func(height int64, round int)
 	doPrevote      func(height int64, round int)
@@ -111,6 +120,9 @@ type ConsensusState struct {
 
 	// closed when we finish shutting down
 	done chan struct{}
+
+	startNewHeightTime time.Time
+	enterProposeTime time.Time
 }
 
 // NewConsensusState returns a new ConsensusState.
@@ -138,6 +150,22 @@ func NewConsensusState(config *cfg.ConsensusConfig, state sm.State, blockExec *s
 	// We do that upon Start().
 	cs.reconstructLastCommit(state)
 	cs.BaseService = *cmn.NewBaseService(nil, "ConsensusState", cs)
+
+	types.RcInit()
+
+	testConfig, _ := emtConfig.ParseConfig()
+	if (testConfig != nil){
+		if (!testConfig.TestConfig.CompactBlock) {
+			compactBlock = false
+		}
+		if (testConfig.TestConfig.BuildFullBlock) {
+			buildFullBlock = true
+		}
+		if (!testConfig.TestConfig.UsePtxHash) {
+			broadcastPtxHash = false
+		}
+	}
+
 	return cs
 }
 
@@ -473,9 +501,13 @@ func (cs *ConsensusState) updateToState(state sm.State) {
 	cs.Proposal = nil
 	cs.ProposalBlock = nil
 	cs.ProposalBlockParts = nil
+	cs.ProposalCMPCTBlock = nil
+	cs.ProposalCMPCTBlockParts = nil
 	cs.LockedRound = 0
 	cs.LockedBlock = nil
 	cs.LockedBlockParts = nil
+	cs.LockedCMPCTBlock = nil
+	cs.LockedCMPCTBlockParts = nil
 	cs.Votes = cstypes.NewHeightVoteSet(state.ChainID, height, validators)
 	cs.CommitRound = -1
 	cs.LastCommit = lastPrecommits
@@ -526,6 +558,8 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 		select {
 		case height := <-cs.mempool.TxsAvailable():
 			cs.handleTxsAvailable(height)
+		case txHash := <-cs.mempool.TxResponsed():
+			cs.handleBuildProposalBlock(txHash)
 		case mi = <-cs.peerMsgQueue:
 			cs.wal.Save(mi)
 			// handles proposals, block parts, votes
@@ -570,6 +604,12 @@ func (cs *ConsensusState) handleMsg(mi msgInfo) {
 	case *BlockPartMessage:
 		// if the proposal is complete, we'll enterPrevote or tryFinalizeCommit
 		_, err = cs.addProposalBlockPart(msg.Height, msg.Part, peerKey != "")
+		if err != nil && msg.Round != cs.Round {
+			err = nil
+		}
+	case *CMPCTBlockPartMessage:
+		// if the proposal is complete, we'll enterPrevote or tryFinalizeCommit
+		_, err = cs.addProposalCMPCTBlockPart(msg.Height, msg.Part, peerKey != "")
 		if err != nil && msg.Round != cs.Round {
 			err = nil
 		}
@@ -637,6 +677,54 @@ func (cs *ConsensusState) handleTxsAvailable(height int64) {
 	cs.enterPropose(height, 0)
 }
 
+func (cs *ConsensusState) buildFullBlockFromCMPCTBlock() {
+	// if get all ptx with raw tx, build ProposalBlock with raw tx
+	if (cs.ProposalCMPCTBlock != nil) {
+		ptxs := make([]types.Tx, 0, len(cs.ProposalCMPCTBlock.Txs))
+		for _, tx := range cs.ProposalCMPCTBlock.Txs {
+			// TODO: handle GetTx return nil, which should not happen
+			_, ptxTemp := cs.mempool.GetTx(tx, types.ParallelTxHash, types.ParallelTx)
+			ptxs = append(ptxs, ptxTemp)
+		}
+		block := cs.ProposalCMPCTBlock
+		block.Data = &types.Data{Txs: ptxs}
+		block.DataHash = block.Data.Hash()
+		cs.ProposalBlock = block
+		cs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
+		cs.Logger.Info("Build proposal block", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
+		if cs.Step == cstypes.RoundStepPropose && cs.isProposalComplete() {
+			// Move onto the next step
+			cs.enterPrevote(cs.cmpctBlockHeight, cs.Round)
+		} else if cs.Step == cstypes.RoundStepCommit {
+			// If we're waiting on the proposal block...
+			cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+		}
+	}
+}
+
+// handleBuildProposalBlock: handle requested tx and build ProposalBlock
+func (cs *ConsensusState) handleBuildProposalBlock(txHash []byte) {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+
+	if (broadcastPtxHash && buildFullBlock) {
+		cs.buildFullBlockFromCMPCTBlock()
+	} else {
+		if (cs.ProposalCMPCTBlock != nil) {
+			cs.ProposalBlock = cs.ProposalCMPCTBlock
+			cs.ProposalBlockParts = cs.ProposalCMPCTBlockParts
+			cs.Logger.Info("All pending tx avaiable, assign cmpct block to ProposalBlock", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
+			if cs.Step == cstypes.RoundStepPropose && cs.isProposalComplete() {
+				// Move onto the next step
+				cs.enterPrevote(cs.cmpctBlockHeight, cs.Round)
+			} else if cs.Step == cstypes.RoundStepCommit {
+				// If we're waiting on the proposal block...
+				cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+			}
+		}
+	}
+}
+
 //-----------------------------------------------------------------------------
 // State functions
 // Used internally by handleTimeout and handleMsg to make state transitions
@@ -679,6 +767,8 @@ func (cs *ConsensusState) enterNewRound(height int64, round int) {
 		cs.Proposal = nil
 		cs.ProposalBlock = nil
 		cs.ProposalBlockParts = nil
+		cs.ProposalCMPCTBlock = nil
+		cs.ProposalCMPCTBlockParts = nil
 	}
 	cs.Votes.SetRound(round + 1) // also track next round (round+1) to allow round-skipping
 
@@ -746,6 +836,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 		cs.Logger.Debug(cmn.Fmt("enterPropose(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, cs.Height, cs.Round, cs.Step))
 		return
 	}
+	types.RcenterPropose()
 	cs.Logger.Info(cmn.Fmt("enterPropose(%v/%v). Current: %v/%v/%v", height, round, cs.Height, cs.Round, cs.Step))
 
 	defer func() {
@@ -780,7 +871,9 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 	} else {
 		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", cs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
 		cs.Logger.Debug("This node is a validator")
+		types.RcstartCreateBlock()
 		cs.decideProposal(height, round)
+		types.RcendCreateBlock()
 	}
 }
 
@@ -788,17 +881,29 @@ func (cs *ConsensusState) isProposer() bool {
 	return bytes.Equal(cs.Validators.GetProposer().Address, cs.privValidator.GetAddress())
 }
 
+func (cs *ConsensusState) CheckIsProposer() bool {
+	return cs.isProposer()
+}
+
+func (cs *ConsensusState) GetPrivAddress() data.Bytes {
+	if (cs.privValidator != nil) {
+		return cs.privValidator.GetAddress()
+	}
+	return nil
+}
+
 func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 	var block *types.Block
-	var blockParts *types.PartSet
+	var blockParts, cmpctBlockParts *types.PartSet
 
 	// Decide on block
 	if cs.LockedBlock != nil {
 		// If we're locked onto a block, just choose that.
 		block, blockParts = cs.LockedBlock, cs.LockedBlockParts
+		_, cmpctBlockParts = cs.LockedCMPCTBlock, cs.LockedCMPCTBlockParts
 	} else {
 		// Create a new proposal block from state/txs from the mempool.
-		block, blockParts = cs.createProposalBlock()
+		block, blockParts, _, cmpctBlockParts = cs.createProposalBlock()
 		if block == nil { // on error
 			return
 		}
@@ -806,6 +911,7 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 
 	// Make proposal
 	polRound, polBlockID := cs.Votes.POLInfo()
+	// proposal header is blockParts header but send cmpctBlockParts
 	proposal := types.NewProposal(height, round, blockParts.Header(), polRound, polBlockID)
 	if err := cs.privValidator.SignProposal(cs.state.ChainID, proposal); err == nil {
 		// Set fields
@@ -817,10 +923,18 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 
 		// send proposal and block parts on internal msg queue
 		cs.sendInternalMessage(msgInfo{&ProposalMessage{proposal}, ""})
-		for i := 0; i < blockParts.Total(); i++ {
-			part := blockParts.GetPart(i)
-			cs.sendInternalMessage(msgInfo{&BlockPartMessage{cs.Height, cs.Round, part}, ""})
+		if (compactBlock) {
+			for i := 0; i < cmpctBlockParts.Total(); i++ {
+				part := cmpctBlockParts.GetPart(i)
+				cs.sendInternalMessage(msgInfo{&CMPCTBlockPartMessage{cs.Height, cs.Round, part}, ""})
+			}
+		} else {
+			for i := 0; i < blockParts.Total(); i++ {
+				part := blockParts.GetPart(i)
+				cs.sendInternalMessage(msgInfo{&BlockPartMessage{cs.Height, cs.Round, part}, ""})
+			}
 		}
+		
 		cs.Logger.Info("Signed proposal", "height", height, "round", round, "proposal", proposal)
 		cs.Logger.Debug(cmn.Fmt("Signed proposal block: %v", block))
 	} else {
@@ -849,7 +963,8 @@ func (cs *ConsensusState) isProposalComplete() bool {
 // Create the next block to propose and return it.
 // Returns nil block upon error.
 // NOTE: keep it side-effect free for clarity.
-func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts *types.PartSet) {
+func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts *types.PartSet,
+		cmpctBlock *types.Block, cmpctBlockParts *types.PartSet) {
 	var commit *types.Commit
 	if cs.Height == 1 {
 		// We're creating a proposal for the first block.
@@ -865,11 +980,25 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 	}
 
 	// Mempool validated transactions
-	txs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-	block, parts := cs.state.MakeBlock(cs.Height, txs, commit)
-	evidence := cs.evpool.PendingEvidence()
-	block.AddEvidence(evidence)
-	return block, parts
+	// First generate CMPCTProposalBlock
+	if (compactBlock) {
+		ptxsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
+		cmpctBlock, cmpctBlockParts := cs.state.MakeBlock(cs.Height, ptxsHash, commit)
+		evidence := cs.evpool.PendingEvidence()
+		cmpctBlock.AddEvidence(evidence)
+		block = cmpctBlock
+		blockParts = cmpctBlockParts
+		return block, blockParts, cmpctBlock, cmpctBlockParts
+	} else {
+		ptxs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
+		block, blockParts := cs.state.MakeBlock(cs.Height, ptxs, commit)
+		evidence := cs.evpool.PendingEvidence()
+		block.AddEvidence(evidence)
+		cmpctBlock = block
+		cmpctBlockParts = blockParts
+		return block, blockParts, cmpctBlock, cmpctBlockParts
+	}
+	return block, blockParts, cmpctBlock, cmpctBlockParts
 }
 
 // Enter: `timeoutPropose` after entering Propose.
@@ -882,6 +1011,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, cs.Height, cs.Round, cs.Step))
 		return
 	}
+	types.RcenterPrevote()
 
 	defer func() {
 		// Done enterPrevote:
@@ -970,6 +1100,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, cs.Height, cs.Round, cs.Step))
 		return
 	}
+	types.RcenterPrecommit()
 
 	cs.Logger.Info(cmn.Fmt("enterPrecommit(%v/%v). Current: %v/%v/%v", height, round, cs.Height, cs.Round, cs.Step))
 
@@ -1037,6 +1168,8 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		cs.LockedRound = round
 		cs.LockedBlock = cs.ProposalBlock
 		cs.LockedBlockParts = cs.ProposalBlockParts
+		cs.LockedCMPCTBlock = cs.ProposalCMPCTBlock
+		cs.LockedCMPCTBlockParts = cs.ProposalCMPCTBlockParts
 		cs.eventBus.PublishEventLock(cs.RoundStateEvent())
 		cs.signAddVote(types.VoteTypePrecommit, blockID.Hash, blockID.PartsHeader)
 		return
@@ -1085,6 +1218,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, commitRound, cs.Height, cs.Round, cs.Step))
 		return
 	}
+	types.RcenterCommit()
 	cs.Logger.Info(cmn.Fmt("enterCommit(%v/%v). Current: %v/%v/%v", height, commitRound, cs.Height, cs.Round, cs.Step))
 
 	defer func() {
@@ -1110,6 +1244,8 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 	if cs.LockedBlock.HashesTo(blockID.Hash) {
 		cs.ProposalBlock = cs.LockedBlock
 		cs.ProposalBlockParts = cs.LockedBlockParts
+		cs.ProposalCMPCTBlock = cs.LockedCMPCTBlock
+		cs.ProposalCMPCTBlockParts = cs.LockedCMPCTBlockParts
 	}
 
 	// If we don't have the block being committed, set up to get it.
@@ -1119,6 +1255,8 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 			// Set up ProposalBlockParts and keep waiting.
 			cs.ProposalBlock = nil
 			cs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
+			cs.ProposalCMPCTBlock = nil
+			cs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 		} else {
 			// We just need to keep waiting.
 		}
@@ -1172,7 +1310,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	cs.Logger.Info(cmn.Fmt("Finalizing commit of block with %d txs", block.NumTxs),
 		"height", block.Height, "hash", block.Hash(), "root", block.AppHash)
-	cs.Logger.Info(cmn.Fmt("%v", block))
+	cs.Logger.Debug(cmn.Fmt("%v", block))
 
 	fail.Fail() // XXX
 
@@ -1233,6 +1371,9 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// * cs.Height has been increment to height+1
 	// * cs.Step is now cstypes.RoundStepNewHeight
 	// * cs.StartTime is set to when we will start round0.
+
+	types.RcBlockHeight(block, blockParts)
+	types.RccommitOver()
 }
 
 //-----------------------------------------------------------------------------
@@ -1267,6 +1408,7 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 
 	cs.Proposal = proposal
 	cs.ProposalBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
+	cs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
 	return nil
 }
 
@@ -1291,6 +1433,7 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		// Added and completed!
 		var n int
 		var err error
+		types.RcreceiveBlock()
 		cs.ProposalBlock = wire.ReadBinary(&types.Block{}, cs.ProposalBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		// NOTE: it's possible to receive complete proposal blocks for future rounds without having the proposal
@@ -1302,6 +1445,119 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(height)
 		}
+		return true, err
+	}
+	return added, nil
+}
+
+// NOTE: block is not necessarily valid.
+func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
+	// Blocks might be reused, so round mismatch is OK
+	if cs.Height != height {
+		return false, nil
+	}
+
+	// We're not expecting a block part.
+	if cs.ProposalBlockParts == nil || cs.ProposalCMPCTBlockParts == nil {
+		return false, nil // TODO: bad peer? Return error?
+	}
+
+	// added, err = cs.ProposalBlockParts.AddPart(part, verify)
+	added, err = cs.ProposalCMPCTBlockParts.AddPart(part, verify)
+	if err != nil {
+		return added, err
+	}
+	if added && cs.ProposalCMPCTBlockParts.IsComplete() {
+		types.RcreceiveBlock()
+		// Added and completed!
+		var n int
+		var err error
+		// TODO: proposal block and proposal cmpct block parts need rebuild
+		cs.ProposalCMPCTBlock = wire.ReadBinary(&types.Block{}, cs.ProposalCMPCTBlockParts.GetReader(),
+			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
+		cs.Logger.Info("Received complete proposal cmpct block", "height", cs.ProposalCMPCTBlock.Height, "hash", cs.ProposalCMPCTBlock.Hash())
+		cs.cmpctBlockHeight = height
+		// assign cmpctblock to block directly
+		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer
+		missTxBool := false
+		if (verify && len(cs.ProposalCMPCTBlock.Txs) != 0) {
+			for _, tx := range cs.ProposalCMPCTBlock.Txs {
+				missTxs := false
+				if (compactBlock) {
+					missTxs, _ = cs.mempool.GetTx(tx, types.ParallelTxHash, types.RawTxHash)
+				}
+				if (missTxs) {
+					missTxBool = true
+					cs.Logger.Info("There miss some tx in cmpct block")
+				}
+			}
+		}
+		// if do not need verify(is proposer) or all tx have in local,
+		// Assign ProposalCMPCTBlock to ProposalBlock direclty
+		if (!verify || !missTxBool) {
+			if (broadcastPtxHash && buildFullBlock) {
+				cs.buildFullBlockFromCMPCTBlock()
+			} else {
+				cs.ProposalBlock = cs.ProposalCMPCTBlock
+				cs.ProposalBlockParts = cs.ProposalCMPCTBlockParts
+				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
+				if cs.Step == cstypes.RoundStepPropose && cs.isProposalComplete() {
+					// Move onto the next step
+					cs.enterPrevote(height, cs.Round)
+				} else if cs.Step == cstypes.RoundStepCommit {
+					// If we're waiting on the proposal block...
+					cs.tryFinalizeCommit(height)
+				}
+			}
+		}
+		// we've received ProposalCMPCTBlock, need build ProposalBlock
+		// 1 Verify tx hash we are having in mempool.txs, need app to parse the tx and return missed hash
+		// 2 If tx missing local, need get from remote peer
+		// 3 rebuild the Data, which need app help to rebuild
+		// 4 After rebuild proposalBlock and proposalBlockParts, re-calc the DataHash in header
+		// if !cs.ProposalBlockParts.IsComplete() {
+		// 	if (len(cs.ProposalCMPCTBlock.Txs) == 0) {
+		// 		// cs.handleBuildProposalBlock(nil)
+		// 		cs.ProposalBlock = cs.ProposalCMPCTBlock
+		// 		cs.ProposalBlockParts = cs.ProposalCMPCTBlockParts
+		// 		cs.Logger.Info("Dont have tx, build proposal block", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
+		// 		if cs.Step == cstypes.RoundStepPropose && cs.isProposalComplete() {
+		// 			// Move onto the next step
+		// 			cs.enterPrevote(cs.cmpctBlockHeight, cs.Round)
+		// 		} else if cs.Step == cstypes.RoundStepCommit {
+		// 			// If we're waiting on the proposal block...
+		// 			cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+		// 		}
+		// 	} else {
+		// 		for _, tx := range cs.ProposalCMPCTBlock.Txs {
+		// 			// need to get the hash from application, let app to parse tx and get hash
+		// 			cs.Logger.Debug("cmpct tx hash", tx.Hash)
+		// 			// send GetTxMessage if tx missing
+		// 			// need new goroutine to receive the tx received
+		// 			ptxs := make([]types.Tx, 0, len(cs.ProposalCMPCTBlock.Txs))
+		// 			for _, tx := range cs.ProposalCMPCTBlock.Txs {
+		// 				// TODO: handle GetTx return nil
+		// 				ptx := cs.mempool.GetTx(tx.Hash(), types.ParallelTxHash, types.ParallelTx)
+		// 				if (ptx == nil) {
+		// 					cs.fetching = append(cs.fetching, tx.Hash())
+		// 				} else {
+		// 					ptxs = append(ptxs, ptx)
+		// 				}
+		// 			}
+		// 			if (len(cs.fetching) == 0) {
+		// 				// if get all ptxs, build ProposalBlock now
+		// 				block := cs.ProposalCMPCTBlock
+		// 				block.Data = &types.Data{Txs: ptxs}
+		// 				block.DataHash = block.Data.Hash()
+		// 				cs.ProposalBlock = block
+		// 				cs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
+		// 				cs.Logger.Info("Received complete proposal block", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
+		// 			}
+		// 		}
+		// 	}
+		// } else {
+		// 	cs.Logger.Info("Alreay received ProposalBlock")
+		// }
 		return true, err
 	}
 	return added, nil
@@ -1385,6 +1641,8 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 						cs.LockedRound = 0
 						cs.LockedBlock = nil
 						cs.LockedBlockParts = nil
+						cs.LockedCMPCTBlock = nil
+						cs.LockedCMPCTBlockParts = nil
 						cs.eventBus.PublishEventUnlock(cs.RoundStateEvent())
 					}
 				}

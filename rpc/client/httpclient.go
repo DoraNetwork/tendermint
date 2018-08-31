@@ -89,16 +89,16 @@ func (c *HTTP) BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit, 
 }
 
 func (c *HTTP) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	return c.broadcastTX("broadcast_tx_async", tx)
+	return c.broadcastTX("broadcast_tx_async", tx, types.RawTx)
 }
 
-func (c *HTTP) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	return c.broadcastTX("broadcast_tx_sync", tx)
+func (c *HTTP) BroadcastTxSync(tx types.Tx, txtype int32) (*ctypes.ResultBroadcastTx, error) {
+	return c.broadcastTX("broadcast_tx_sync", tx, txtype)
 }
 
-func (c *HTTP) broadcastTX(route string, tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+func (c *HTTP) broadcastTX(route string, tx types.Tx, txtype int32) (*ctypes.ResultBroadcastTx, error) {
 	result := new(ctypes.ResultBroadcastTx)
-	_, err := c.rpc.Call(route, map[string]interface{}{"tx": tx}, result)
+	_, err := c.rpc.Call(route, map[string]interface{}{"tx": tx, "txtype": txtype}, result)
 	if err != nil {
 		return nil, errors.Wrap(err, route)
 	}

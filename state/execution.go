@@ -382,6 +382,7 @@ func updateState(s State, blockID types.BlockID, header *types.Header,
 // NOTE: if Tendermint crashes before commit, some or all of these events may be published again.
 func fireEvents(logger log.Logger, eventBus types.BlockEventPublisher, block *types.Block, abciResponses *ABCIResponses) {
 	// NOTE: do we still need this buffer ?
+	// TODO: would change to ptx, where to use the publish event tx
 	txEventBuffer := types.NewTxEventBuffer(eventBus, int(block.NumTxs))
 	for i, tx := range block.Data.Txs {
 		txEventBuffer.PublishEventTx(types.EventDataTx{types.TxResult{

@@ -95,6 +95,7 @@ type Peer struct {
 type ResultValidators struct {
 	BlockHeight int64              `json:"block_height"`
 	Validators  []*types.Validator `json:"validators"`
+	IsProposer  bool               `json:"isproposer"`
 }
 
 type ResultDumpConsensusState struct {

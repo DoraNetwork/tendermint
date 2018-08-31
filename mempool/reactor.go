@@ -14,11 +14,14 @@ import (
 	cfg "github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/types"
+	"gopkg.in/fatih/set.v0"
+	// "github.com/ethereum/go-ethereum/common"
 )
 
 const (
 	MempoolChannel = byte(0x30)
 
+	maxKnownTxs      = 32768
 	maxMempoolMessageSize      = 1048576 // 1MB TODO make it configurable
 	peerCatchupSleepIntervalMS = 100     // If peer is behind, sleep this amount
 )
@@ -28,6 +31,7 @@ type MempoolReactor struct {
 	p2p.BaseReactor
 	config  *cfg.MempoolConfig
 	Mempool *Mempool
+	// requestingTx [][]byte
 }
 
 // NewMempoolReactor returns a new MempoolReactor with the given config and mempool.
@@ -36,6 +40,7 @@ func NewMempoolReactor(config *cfg.MempoolConfig, mempool *Mempool) *MempoolReac
 		config:  config,
 		Mempool: mempool,
 	}
+	// memR.requestingTx = make([][]byte, 0)
 	memR.BaseReactor = *p2p.NewBaseReactor("MempoolReactor", memR)
 	return memR
 }
@@ -60,12 +65,37 @@ func (memR *MempoolReactor) GetChannels() []*p2p.ChannelDescriptor {
 // AddPeer implements Reactor.
 // It starts a broadcast routine ensuring all txs are forwarded to the given peer.
 func (memR *MempoolReactor) AddPeer(peer p2p.Peer) {
+	memR.Logger.Info("*************************************")
+	memR.Logger.Info("************Add peer ************")
+	peerSet := set.New()
+	peer.Set(types.PeerMempoolChKey, peerSet)
+	memR.Logger.Info("*************************************")
 	go memR.broadcastTxRoutine(peer)
 }
 
 // RemovePeer implements Reactor.
 func (memR *MempoolReactor) RemovePeer(peer p2p.Peer, reason interface{}) {
 	// broadcast routine checks if peer is gone and returns
+	// TODO: remove the peer in knownTxs or not
+}
+
+// SendTxMessage response peer GetTxMessage and send back to peer
+func (memR *MempoolReactor) SendTxMessage(hash []byte, tx types.Tx, src p2p.Peer) {
+	msg := &TxMessage{Hash: hash, Tx: tx}
+	success := src.Send(MempoolChannel, struct{ MempoolMessage }{msg})
+	if !success {
+		memR.Logger.Error("Send tx", tx, "to peer", src, "not success")
+	}
+}
+
+// MarkTransaction marks a transaction as known for the peer, ensuring that it
+// will never be propagated to this particular peer.
+func (memR *MempoolReactor) MarkTransaction(peerSet *set.Set, tx []byte) {
+	// If we reached the memory allowance, drop a previously known transaction hash
+	for peerSet.Size() >= maxKnownTxs {
+		peerSet.Pop()
+	}
+	peerSet.Add(string(tx))
 }
 
 // Receive implements Reactor.
@@ -77,22 +107,36 @@ func (memR *MempoolReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 		return
 	}
 	memR.Logger.Debug("Receive", "src", src, "chId", chID, "msg", msg)
+	peerSet := src.Get(types.PeerMempoolChKey).(*set.Set)
 
 	switch msg := msg.(type) {
 	case *TxMessage:
-		err := memR.Mempool.CheckTx(msg.Tx, nil)
+		memR.MarkTransaction(peerSet, msg.Tx)
+		// hash := types.BytesToHash(msg.Hash)
+		err := memR.Mempool.CheckTx(msg.Tx, msg.Hash, types.RawTx, false, nil)
 		if err != nil {
 			memR.Logger.Info("Could not check tx", "tx", msg.Tx, "err", err)
 		}
 		// broadcasting happens from go routines per peer
+	case *GetTxMessage:
+		for _, hash := range msg.Hash {
+			_, tx := memR.Mempool.GetTx(hash, types.RawTxHash, types.RawTx)
+			if (tx == nil) {
+				memR.Logger.Error("GetTxMessage:Can not find tx hash", hash)
+				continue
+			}
+			// txs = append(txs, tx)
+			// TODO: send one by one or send together
+			go memR.SendTxMessage(tx, hash, src)
+		}
 	default:
 		memR.Logger.Error(fmt.Sprintf("Unknown message type %v", reflect.TypeOf(msg)))
 	}
 }
 
 // BroadcastTx is an alias for Mempool.CheckTx. Broadcasting itself happens in peer routines.
-func (memR *MempoolReactor) BroadcastTx(tx types.Tx, cb func(*abci.Response)) error {
-	return memR.Mempool.CheckTx(tx, cb)
+func (memR *MempoolReactor) BroadcastTx(tx types.Tx, txhash types.CommonHash, cb func(*abci.Response)) error {
+	return memR.Mempool.CheckTx(tx, txhash, types.RawTx, false, cb)
 }
 
 // PeerState describes the state of a peer.
@@ -107,6 +151,7 @@ func (memR *MempoolReactor) broadcastTxRoutine(peer p2p.Peer) {
 	if !memR.config.Broadcast {
 		return
 	}
+	peerSet := peer.Get(types.PeerMempoolChKey).(*set.Set)
 
 	var next *clist.CElement
 	for {
@@ -129,8 +174,20 @@ func (memR *MempoolReactor) broadcastTxRoutine(peer p2p.Peer) {
 				continue
 			}
 		}
+		if (peerSet.Has(string(memTx.tx))) {
+			memR.Logger.Debug("*************************************")
+			memR.Logger.Debug("peer have the same tx", memTx.tx, "dont need send")
+			memR.Logger.Debug("*************************************")
+			time.Sleep(peerCatchupSleepIntervalMS * time.Millisecond)
+			next = next.NextWait()
+			continue
+		} else {
+			memR.Logger.Debug("*************************************")
+			memR.Logger.Debug("peer dont have the same tx", memTx.tx, "send it")
+			memR.Logger.Debug("*************************************")
+		}
 		// send memTx
-		msg := &TxMessage{Tx: memTx.tx}
+		msg := &TxMessage{Hash: nil, Tx: memTx.tx}
 		success := peer.Send(MempoolChannel, struct{ MempoolMessage }{msg})
 		if !success {
 			time.Sleep(peerCatchupSleepIntervalMS * time.Millisecond)
@@ -170,7 +227,13 @@ func DecodeMessage(bz []byte) (msgType byte, msg MempoolMessage, err error) {
 
 // TxMessage is a MempoolMessage containing a transaction.
 type TxMessage struct {
+	Hash []byte
 	Tx types.Tx
+}
+
+// GetTxMessage is a MempoolMessage containing a transaction hash.
+type GetTxMessage struct {
+	Hash [][]byte
 }
 
 // String returns a string representation of the TxMessage.

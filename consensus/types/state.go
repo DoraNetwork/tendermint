@@ -58,22 +58,26 @@ func (rs RoundStepType) String() string {
 // NOTE: Not thread safe. Should only be manipulated by functions downstream
 // of the cs.receiveRoutine
 type RoundState struct {
-	Height             int64 // Height we are working on
-	Round              int
-	Step               RoundStepType
-	StartTime          time.Time
-	CommitTime         time.Time // Subjective time when +2/3 precommits for Block at Round were found
-	Validators         *types.ValidatorSet
-	Proposal           *types.Proposal
-	ProposalBlock      *types.Block
-	ProposalBlockParts *types.PartSet
-	LockedRound        int
-	LockedBlock        *types.Block
-	LockedBlockParts   *types.PartSet
-	Votes              *HeightVoteSet
-	CommitRound        int            //
-	LastCommit         *types.VoteSet // Last precommits at Height-1
-	LastValidators     *types.ValidatorSet
+	Height                  int64 // Height we are working on
+	Round                   int
+	Step                    RoundStepType
+	StartTime               time.Time
+	CommitTime              time.Time // Subjective time when +2/3 precommits for Block at Round were found
+	Validators              *types.ValidatorSet
+	Proposal                *types.Proposal
+	ProposalBlock           *types.Block
+	ProposalBlockParts      *types.PartSet
+	ProposalCMPCTBlock      *types.Block
+	ProposalCMPCTBlockParts *types.PartSet
+	LockedRound             int
+	LockedBlock             *types.Block
+	LockedBlockParts        *types.PartSet
+	LockedCMPCTBlock        *types.Block
+	LockedCMPCTBlockParts   *types.PartSet
+	Votes                   *HeightVoteSet
+	CommitRound             int            //
+	LastCommit              *types.VoteSet // Last precommits at Height-1
+	LastValidators          *types.ValidatorSet
 }
 
 // RoundStateEvent returns the H/R/S of the RoundState as an event.

@@ -8,6 +8,14 @@ import (
 	abci "github.com/tendermint/abci/types"
 	"github.com/tendermint/go-wire/data"
 	"github.com/tendermint/tmlibs/merkle"
+	//wire "github.com/tendermint/go-wire"
+)
+
+const (
+	RawTx           = int32(0x01) // original tx
+	RawTxHash       = int32(0x02) // original tx hash
+	ParallelTx      = int32(0x03) // parallel tx info, contains tx
+	ParallelTxHash  = int32(0x04) // parallel tx info, contains tx hash
 )
 
 // Tx is an arbitrary byte array.
@@ -15,6 +23,29 @@ import (
 // Alternatively, it may make sense to add types here and let
 // []byte be type 0x1 so we can have versioned txs if need be in the future.
 type Tx []byte
+type TxHash [32]byte
+type CommonHash []byte
+
+type TxMessage struct {
+	Tx Tx
+}
+
+type ParallelTxMessage struct {
+	Tx Tx
+}
+
+type ParallelTxHashMessage struct {
+	Tx Tx
+}
+
+type AppTxMessage interface{}
+
+// var _ = wire.RegisterInterface(
+// 	struct{ AppTxMessage }{},
+// 	wire.ConcreteType{&TxMessage{}, RawTx},
+// 	wire.ConcreteType{&ParallelTxMessage{}, ParallelTx},
+// 	wire.ConcreteType{&ParallelTxHashMessage{}, ParallelTxHash},
+// )
 
 // Hash computes the RIPEMD160 hash of the go-wire encoded transaction.
 func (tx Tx) Hash() []byte {
@@ -122,4 +153,14 @@ type TxResult struct {
 	Index  uint32                 `json:"index"`
 	Tx     Tx                     `json:"tx"`
 	Result abci.ResponseDeliverTx `json:"result"`
+}
+
+func BytesToHash(b []byte) TxHash {
+	var h TxHash
+	if len(b) > len(h) {
+		b = b[len(b)-32:]
+	}
+
+	copy(h[32-len(b):], b)
+	return h
 }

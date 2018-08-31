@@ -15,6 +15,8 @@ import (
 	cmn "github.com/tendermint/tmlibs/common"
 	flow "github.com/tendermint/tmlibs/flowrate"
 	"github.com/tendermint/tmlibs/log"
+
+	"github.com/tendermint/tendermint/types"
 )
 
 var legacy = tmlegacy.TMEncoderLegacy{}
@@ -245,7 +247,7 @@ func (c *MConnection) Send(chID byte, msg interface{}) bool {
 		return false
 	}
 
-	success := channel.sendBytes(wire.BinaryBytes(msg))
+	success := channel.sendBytes(chID, wire.BinaryBytes(msg))
 	if success {
 		// Wake up sendRoutine if necessary
 		select {
@@ -274,7 +276,7 @@ func (c *MConnection) TrySend(chID byte, msg interface{}) bool {
 		return false
 	}
 
-	ok = channel.trySendBytes(wire.BinaryBytes(msg))
+	ok = channel.trySendBytes(chID, wire.BinaryBytes(msg))
 	if ok {
 		// Wake up sendRoutine if necessary
 		select {
@@ -487,6 +489,7 @@ FOR_LOOP:
 			if msgBytes != nil {
 				c.Logger.Debug("Received bytes", "chID", pkt.ChannelID, "msgBytes", msgBytes)
 				// NOTE: This means the reactor.Receive runs in the same thread as the p2p recv routine
+				types.RcReciveMsg(pkt.ChannelID, len(msgBytes))
 				c.onReceive(pkt.ChannelID, msgBytes)
 			}
 		default:
@@ -599,7 +602,8 @@ func (ch *Channel) SetLogger(l log.Logger) {
 // Queues message to send to this channel.
 // Goroutine-safe
 // Times out (and returns false) after defaultSendTimeout
-func (ch *Channel) sendBytes(bytes []byte) bool {
+func (ch *Channel) sendBytes(id byte, bytes []byte) bool {
+	types.RcSendMsg(id, len(bytes))
 	select {
 	case ch.sendQueue <- bytes:
 		atomic.AddInt32(&ch.sendQueueSize, 1)
@@ -612,7 +616,8 @@ func (ch *Channel) sendBytes(bytes []byte) bool {
 // Queues message to send to this channel.
 // Nonblocking, returns true if successful.
 // Goroutine-safe
-func (ch *Channel) trySendBytes(bytes []byte) bool {
+func (ch *Channel) trySendBytes(id byte, bytes []byte) bool {
+	types.RcSendMsg(id, len(bytes))
 	select {
 	case ch.sendQueue <- bytes:
 		atomic.AddInt32(&ch.sendQueueSize, 1)

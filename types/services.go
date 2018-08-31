@@ -23,13 +23,18 @@ type Mempool interface {
 	Unlock()
 
 	Size() int
-	CheckTx(Tx, func(*abci.Response)) error
+	CheckTx(Tx, CommonHash, int32, bool, func(*abci.Response)) error
 	Reap(int) Txs
 	Update(height int64, txs Txs) error
 	Flush()
 
 	TxsAvailable() <-chan int64
 	EnableTxsAvailable()
+
+	TxResponsed() <-chan []byte
+
+	GetTx(tx []byte, from int32, to int32) (bool, Tx)
+	TxsFetching() <-chan [][]byte
 }
 
 // MockMempool is an empty implementation of a Mempool, useful for testing.
@@ -37,15 +42,18 @@ type Mempool interface {
 type MockMempool struct {
 }
 
-func (m MockMempool) Lock()                                        {}
-func (m MockMempool) Unlock()                                      {}
-func (m MockMempool) Size() int                                    { return 0 }
-func (m MockMempool) CheckTx(tx Tx, cb func(*abci.Response)) error { return nil }
-func (m MockMempool) Reap(n int) Txs                               { return Txs{} }
-func (m MockMempool) Update(height int64, txs Txs) error           { return nil }
-func (m MockMempool) Flush()                                       {}
-func (m MockMempool) TxsAvailable() <-chan int64                   { return make(chan int64) }
-func (m MockMempool) EnableTxsAvailable()                          {}
+func (m MockMempool) Lock()                                                   {}
+func (m MockMempool) Unlock()                                                 {}
+func (m MockMempool) Size() int                                               { return 0 }
+func (m MockMempool) CheckTx(tx Tx, hash CommonHash, flag int32, local bool, cb func(*abci.Response)) error { return nil }
+func (m MockMempool) Reap(n int) Txs                                          { return Txs{} }
+func (m MockMempool) Update(height int64, txs Txs) error                      { return nil }
+func (m MockMempool) Flush()                                                  {}
+func (m MockMempool) TxsAvailable() <-chan int64                              { return make(chan int64) }
+func (m MockMempool) EnableTxsAvailable()                                     {}
+func (m MockMempool) TxResponsed() <-chan []byte                              { return make(chan []byte) }
+func (m MockMempool) GetTx(tx []byte, from int32, to int32) (bool, Tx)        { return true, nil }
+func (m MockMempool) TxsFetching() <-chan [][]byte                            { return make(chan [][]byte) }
 
 //------------------------------------------------------
 // blockstore

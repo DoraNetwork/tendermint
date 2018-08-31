@@ -38,7 +38,7 @@ type ABCIClient interface {
 	// writing to abci app
 	BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error)
 	BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error)
-	BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error)
+	BroadcastTxSync(tx types.Tx, txtype int32) (*ctypes.ResultBroadcastTx, error)
 }
 
 // SignClient groups together the interfaces need to get valid

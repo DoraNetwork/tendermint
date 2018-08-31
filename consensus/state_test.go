@@ -189,7 +189,7 @@ func TestBadProposal(t *testing.T) {
 	proposalCh := subscribe(cs1.eventBus, types.EventQueryCompleteProposal)
 	voteCh := subscribe(cs1.eventBus, types.EventQueryVote)
 
-	propBlock, _ := cs1.createProposalBlock() //changeProposer(t, cs1, vs2)
+	propBlock, _, _, _ := cs1.createProposalBlock() //changeProposer(t, cs1, vs2)
 
 	// make the second validator the proposer by incrementing round
 	round = round + 1

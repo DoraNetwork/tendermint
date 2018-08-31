@@ -20,6 +20,7 @@ type PeerRoundState struct {
 	Proposal                 bool                // True if peer has proposal for this round
 	ProposalBlockPartsHeader types.PartSetHeader //
 	ProposalBlockParts       *cmn.BitArray       //
+	ProposalCMPCTBlockParts  *cmn.BitArray		 //
 	ProposalPOLRound         int                 // Proposal's POL round. -1 if none.
 	ProposalPOL              *cmn.BitArray       // nil until ProposalPOLMessage received.
 	Prevotes                 *cmn.BitArray       // All votes peer has for this round

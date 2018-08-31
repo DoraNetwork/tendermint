@@ -19,6 +19,8 @@ import (
 	cfg "github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/proxy"
 	"github.com/tendermint/tendermint/types"
+
+	emtConfig "github.com/dora/ultron/node/config"
 )
 
 /*
@@ -50,6 +52,8 @@ TODO: Better handle abci client errors. (make it automatically handle connection
 */
 
 const cacheSize = 100000
+var removeCacheTx = false
+var usePtxHash = true
 
 // Mempool is an ordered in-memory pool for transactions before they are proposed in a consensus
 // round. Transaction validity is checked using the CheckTx abci message before the transaction is
@@ -61,6 +65,10 @@ type Mempool struct {
 	proxyMtx             sync.Mutex
 	proxyAppConn         proxy.AppConnMempool
 	txs                  *clist.CList    // concurrent linked-list of good txs
+	txsHashMap           map[types.TxHash]types.Tx	// tx and hash(app hash) map
+	ptxs                 *clist.CList    // parallel txs
+	ptxsHash             *clist.CList    // parallel txs with tx hash
+	txType               int32           // mempool tx type
 	counter              int64           // simple incrementing counter
 	height               int64           // the last block Update()'d to
 	rechecking           int32           // for re-checking filtered txs on Update()
@@ -68,7 +76,9 @@ type Mempool struct {
 	recheckEnd           *clist.CElement // re-checking stops here
 	notifiedTxsAvailable bool            // true if fired on txsAvailable for this height
 	txsAvailable         chan int64      // fires the next height once for each height, when the mempool is not empty
-
+	TxsAllRequested      chan []byte     // all tx requested arrived, used for response of GetTx
+	fetchingTx           [][]byte		 // fetching tx from remote peer
+	requestingTx		 chan [][]byte   // requesting tx from remote peer
 	// Keep a cache of already-seen txs.
 	// This reduces the pressure on the proxyApp.
 	cache *txCache
@@ -86,6 +96,10 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		config:        config,
 		proxyAppConn:  proxyAppConn,
 		txs:           clist.New(),
+		txsHashMap:    make(map[types.TxHash]types.Tx),
+		ptxs:          clist.New(),
+		ptxsHash:      clist.New(),
+		txType:        types.RawTx,
 		counter:       0,
 		height:        height,
 		rechecking:    0,
@@ -95,7 +109,20 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		cache:         newTxCache(cacheSize),
 	}
 	mempool.initWAL()
+	mempool.fetchingTx = make([][]byte, 0)
 	proxyAppConn.SetResponseCallback(mempool.resCb)
+	mempool.TxsAllRequested = make(chan []byte, 1)
+
+	types.RcPtxInBlock()
+	testConfig, _ := emtConfig.ParseConfig()
+	if (testConfig != nil) {
+		if (testConfig.TestConfig.RepeatTxTest) {
+			removeCacheTx = true
+		}
+		if (!testConfig.TestConfig.UsePtxHash) {
+			usePtxHash = false
+		}
+	}
 	return mempool
 }
 
@@ -180,16 +207,117 @@ func (mem *Mempool) TxsFrontWait() *clist.CElement {
 	return mem.txs.FrontWait()
 }
 
+// TxsFetching is mempool/reactor to get tx would to fetch
+// TODO: need assign the requsting tx to the send block peer but not random one
+func (mem *Mempool) TxsFetching() <-chan [][]byte {
+	return mem.requestingTx
+}
+
+// NotifiyFetchingTx is set fetchingTx to chan
+// TODO: avoid chan block when there is no peer read the chan
+func (mem *Mempool) NotifiyFetchingTx() {
+	if (len(mem.fetchingTx) == 0) {
+		mem.requestingTx <- nil		//clear fetching in mempool/reactor
+	} else {
+		mem.requestingTx <- mem.fetchingTx
+	}
+}
+
+// GetTx returns the tx from 'from' type to 'to' type
+func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
+	mem.proxyMtx.Lock()
+	defer mem.proxyMtx.Unlock()
+	mem.logger.Info("Get tx", "from", from, "to", to)
+
+	missTx := false
+	if (from == types.ParallelTxHash && to == types.RawTxHash) {
+		ptx, _, _ := types.DecodePtx(hash)
+		if (ptx == nil) {
+			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
+		}
+		for _, txHash := range ptx.Data.TxIds {
+			if (mem.txsHashMap[txHash] == nil) {
+				mem.fetchingTx = append(mem.fetchingTx, txHash[:])
+				missTx = true
+			}
+		}
+		if (missTx) {
+			mem.NotifiyFetchingTx()
+			return true, nil
+		}
+	} else if (from == types.RawTxHash && to == types.RawTx) {
+		tx := mem.txsHashMap[types.BytesToHash(hash)]
+		if (tx != nil) {
+			return true, tx
+		}
+	} else if (from == types.ParallelTxHash && to == types.ParallelTx) {
+		ptx, _, len := types.DecodePtx(hash)
+		if (ptx == nil) {
+			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
+		}
+		fmt.Println("ptx has tx len", len)
+		ptxRawTx := make([][]byte, 0, 1)//mem.txs.Len())
+		for _, txHash := range ptx.Data.TxIds {
+			if (mem.txsHashMap[txHash] == nil) {
+				cmn.PanicSanity(cmn.Fmt("GetTx from ptxhash to ptx still miss some hash", txHash))
+				continue
+			}
+			ptxRawTx = append(ptxRawTx, mem.txsHashMap[txHash])
+		}
+		txsInPts, err := types.EncodePtx(hash, ptxRawTx)
+		if (err != nil) {
+			cmn.PanicSanity(cmn.Fmt("GetTx EncodePtx fail"))
+		}
+		return false, txsInPts
+	} 
+	return false, nil
+}
+
 // CheckTx executes a new transaction against the application to determine its validity
 // and whether it should be added to the mempool.
 // It blocks if we're waiting on Update() or Reap().
 // cb: A callback from the CheckTx command.
 //     It gets called from another goroutine.
 // CONTRACT: Either cb will get called, or err returned.
-func (mem *Mempool) CheckTx(tx types.Tx, cb func(*abci.Response)) (err error) {
+func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, local bool, cb func(*abci.Response)) (err error) {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 
+	// Note: If it is parallel tx, just PushBack to ptxs
+	if txType == types.ParallelTx {
+		memTx := &mempoolTx{
+			counter: mem.counter,
+			height:  mem.height,
+			tx:      tx,
+		}
+		mem.ptxs.PushBack(memTx)
+		mem.notifyTxsAvailable()
+		types.RcPtxInBlock()
+		return nil
+	} else if (txType == types.ParallelTxHash) {
+		// check tx in ptx exist in mempool
+		ptx, _, _ := types.DecodePtx(tx)
+		if (ptx == nil) {
+			cmn.PanicSanity(cmn.Fmt("CheckTx() decodePtx is nil"))
+		}
+		for _, txHash := range ptx.Data.TxIds {
+			txHashMaptx := mem.txsHashMap[txHash]
+			if (txHashMaptx == nil) {
+				cmn.PanicSanity(cmn.Fmt("Broadcast ptx but tx not exist in mempook", txHash))
+			}
+		}
+		memTx := &mempoolTx{
+			counter: mem.counter,
+			height:  mem.height,
+			tx:      tx,
+		}
+		mem.ptxsHash.PushBack(memTx)
+		mem.notifyTxsAvailable()
+		types.RcPtxInBlock()
+		return nil
+	}
+	// Use the hash send from remote peer
+	mem.handleTxArrive(hash)
 	// CACHE
 	if mem.cache.Exists(tx) {
 		return fmt.Errorf("Tx already exists in cache")
@@ -215,7 +343,7 @@ func (mem *Mempool) CheckTx(tx types.Tx, cb func(*abci.Response)) (err error) {
 	if err = mem.proxyAppConn.Error(); err != nil {
 		return err
 	}
-	reqRes := mem.proxyAppConn.CheckTxAsync(tx)
+	reqRes := mem.proxyAppConn.CheckTxAsync(abci.RequestCheckTx{Tx: tx,Local: local})
 	if cb != nil {
 		reqRes.SetCallback(cb)
 	}
@@ -232,6 +360,23 @@ func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
 	}
 }
 
+func (mem *Mempool) handleTxArrive(txHash []byte) {
+	if (len(mem.fetchingTx) == 0 || txHash == nil) {
+		return
+	}
+	for index, hash := range mem.fetchingTx {
+		if (bytes.Equal(hash, txHash)) {
+			mem.logger.Debug("app broadcast tx match fetching hash", txHash)
+			mem.fetchingTx = append(mem.fetchingTx[:index], mem.fetchingTx[index:]...)
+			break
+		}
+	}
+	if (len(mem.fetchingTx) == 0) {
+		// notify, the txHash not useful now
+		mem.TxsAllRequested <- txHash
+	}
+}
+
 func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 	switch r := res.Value.(type) {
 	case *abci.Response_CheckTx:
@@ -243,9 +388,16 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				height:  mem.height,
 				tx:      tx,
 			}
+			if (removeCacheTx) {
+				mem.cache.Remove(tx)
+			}
 			mem.txs.PushBack(memTx)
-			mem.logger.Info("Added good transaction", "tx", tx, "res", r)
-			mem.notifyTxsAvailable()
+			if (usePtxHash) {
+				mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
+				// fmt.Println("Mempool add tx hash", types.BytesToHash(r.CheckTx.Data))
+			}
+			mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
+			//mem.notifyTxsAvailable()
 		} else {
 			// ignore bad transaction
 			mem.logger.Info("Rejected bad transaction", "tx", tx, "res", r)
@@ -254,6 +406,19 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 			mem.cache.Remove(tx)
 
 			// TODO: handle other retcodes
+		}
+	case *abci.Response_GetTx:
+		if r.GetTx.Code == abci.CodeTypeOK {
+			mem.logger.Info("Response_GetTx get missed tx hash is", r.GetTx.Response)
+			// TODO: handle missedHash
+			if (r.GetTx.Response != nil) {
+				mem.fetchingTx = append(mem.fetchingTx, r.GetTx.Response)
+				// send GetTx message to remote peer
+				// TODO: notify together, current is each pts to notify
+				mem.NotifiyFetchingTx()
+			}
+		} else {
+			mem.logger.Info("Response_GetTx return error", r.GetTx.Code)
 		}
 	default:
 		// ignore other messages
@@ -290,7 +455,7 @@ func (mem *Mempool) resCbRecheck(req *abci.Request, res *abci.Response) {
 
 			// incase the recheck removed all txs
 			if mem.Size() > 0 {
-				mem.notifyTxsAvailable()
+				//mem.notifyTxsAvailable()
 			}
 		}
 	default:
@@ -306,13 +471,18 @@ func (mem *Mempool) TxsAvailable() <-chan int64 {
 }
 
 func (mem *Mempool) notifyTxsAvailable() {
-	if mem.Size() == 0 {
-		panic("notified txs available but mempool is empty!")
-	}
+	// if mem.Size() == 0 {
+	// 	panic("notified txs available but mempool is empty!")
+	// }
 	if mem.txsAvailable != nil && !mem.notifiedTxsAvailable {
 		mem.notifiedTxsAvailable = true
 		mem.txsAvailable <- mem.height + 1
 	}
+}
+
+// TxResponsed is GetTx response
+func (mem *Mempool) TxResponsed() <-chan []byte {
+	return mem.TxsAllRequested
 }
 
 // Reap returns a list of transactions currently in the mempool.
@@ -331,16 +501,34 @@ func (mem *Mempool) Reap(maxTxs int) types.Txs {
 }
 
 // maxTxs: -1 means uncapped, 0 means none
+// Note: get ptx(with raw tx hash) but not raw tx
 func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 	if maxTxs == 0 {
 		return []types.Tx{}
 	} else if maxTxs < 0 {
-		maxTxs = mem.txs.Len()
+		// maxTxs = mem.txs.Len()
+		maxTxs = mem.ptxsHash.Len()
 	}
-	txs := make([]types.Tx, 0, cmn.MinInt(mem.txs.Len(), maxTxs))
-	for e := mem.txs.Front(); e != nil && len(txs) < maxTxs; e = e.Next() {
-		memTx := e.Value.(*mempoolTx)
-		txs = append(txs, memTx.tx)
+	txLen := 0
+	if (usePtxHash) {
+		txLen = mem.ptxsHash.Len()
+	} else {
+		txLen = mem.ptxs.Len()
+	}
+
+	txLen = cmn.MinInt(txLen, maxTxs)
+	txs := make([]types.Tx, 0, txLen)
+
+	if (usePtxHash) {
+		for e := mem.ptxsHash.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+			memTx := e.Value.(*mempoolTx)
+			txs = append(txs, memTx.tx)
+		}
+	} else {
+		for e := mem.ptxs.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+			memTx := e.Value.(*mempoolTx)
+			txs = append(txs, memTx.tx)
+		}
 	}
 	return txs
 }
@@ -348,14 +536,42 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 // Update informs the mempool that the given txs were committed and can be discarded.
 // NOTE: this should be called *after* block is committed by consensus.
 // NOTE: unsafe; Lock/Unlock must be managed by caller
+// TODO: remove the tx in tx map, current can not remove as txs are ptx hash
+// TODO: handle tx,ptx,ptxhash...cases
 func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	if err := mem.proxyAppConn.FlushSync(); err != nil { // To flush async resCb calls e.g. from CheckTx
 		return err
 	}
-	// First, create a lookup map of txns in new txs.
 	txsMap := make(map[string]struct{})
-	for _, tx := range txs {
-		txsMap[string(tx)] = struct{}{}
+	if (usePtxHash) {
+		// First, create a lookup map of txns in new txs.
+		for _, tx := range txs {
+			// txsMap[string(tx)] = struct{}{}
+			ptx, _, _ := types.DecodePtx(tx)
+			if (ptx == nil) {
+				cmn.PanicSanity(cmn.Fmt("Update() decodePtx is nil"))
+			}
+			for _, txHash := range ptx.Data.TxIds {
+				txHashMaptx := mem.txsHashMap[txHash]
+				if (txHashMaptx != nil) {
+					txsMap[string(txHashMaptx)] = struct{}{}
+					delete(mem.txsHashMap, txHash)
+				} else {
+					mem.logger.Error("Update mempool can not find tx", txHash)
+				}
+			}
+		}
+	} else {
+		// First, create a lookup map of txns in new txs.
+		for _, tx := range txs {
+			ptx, _, _ := types.DecodePtx(tx)
+			if (ptx == nil) {
+				cmn.PanicSanity(cmn.Fmt("Update() decodePtx is nil"))
+			}
+			for _, txRaw := range ptx.Data.Txs {
+				txsMap[string(txRaw)] = struct{}{}
+			}
+		}
 	}
 
 	// Set height
@@ -374,11 +590,24 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		// mem.recheckCursor re-scans mem.txs and possibly removes some txs.
 		// Before mem.Reap(), we should wait for mem.recheckCursor to be nil.
 	}
+
+	// Clear PTX pool
+	// TODO: reset directly but not use for
+	for e := mem.ptxs.Front(); e != nil; e = e.Next() {
+		mem.ptxs.Remove(e)
+	}
+	for e := mem.ptxsHash.Front(); e != nil; e = e.Next() {
+		mem.ptxsHash.Remove(e)
+	}
+	mem.fetchingTx = mem.fetchingTx[:0]
+	//mem.NotifiyFetchingTx()
 	return nil
 }
 
+// Note: remove the tx in txs from blockTxsMap
 func (mem *Mempool) filterTxs(blockTxsMap map[string]struct{}) []types.Tx {
 	goodTxs := make([]types.Tx, 0, mem.txs.Len())
+	mem.logger.Info("Before update mempool, tx size", mem.txs.Len())
 	for e := mem.txs.Front(); e != nil; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
 		// Remove the tx if it's alredy in a block.
@@ -393,6 +622,7 @@ func (mem *Mempool) filterTxs(blockTxsMap map[string]struct{}) []types.Tx {
 		// Good tx!
 		goodTxs = append(goodTxs, memTx.tx)
 	}
+	mem.logger.Info("After update mempool, tx size", mem.txs.Len())
 	return goodTxs
 }
 
@@ -408,7 +638,7 @@ func (mem *Mempool) recheckTxs(goodTxs []types.Tx) {
 	// Push txs to proxyAppConn
 	// NOTE: resCb() may be called concurrently.
 	for _, tx := range goodTxs {
-		mem.proxyAppConn.CheckTxAsync(tx)
+		mem.proxyAppConn.CheckTxAsync(abci.RequestCheckTx{Tx: tx, Local: false})
 	}
 	mem.proxyAppConn.FlushAsync()
 }

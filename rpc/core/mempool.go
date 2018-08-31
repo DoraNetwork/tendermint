@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
+	"bytes"
 
 	"github.com/pkg/errors"
 
@@ -11,7 +12,20 @@ import (
 	data "github.com/tendermint/go-wire/data"
 	ctypes "github.com/tendermint/tendermint/rpc/core/types"
 	"github.com/tendermint/tendermint/types"
+	wire "github.com/tendermint/go-wire"
 )
+
+type MemAppTxMessage types.AppTxMessage
+
+// DecodeMessage decodes a byte-array into a AppTxMessage.
+func DecodeMessage(bz []byte) (msgType byte, msg MemAppTxMessage, err error) {
+	msgType = bz[0]
+	n := new(int)
+	r := bytes.NewReader(bz)
+	// TODO: define max tx size
+	msg = wire.ReadBinary(struct{ MemAppTxMessage }{}, r, 10240, n, &err).(struct{ MemAppTxMessage }).MemAppTxMessage
+	return
+}
 
 //-----------------------------------------------------------------------------
 // NOTE: tx should be signed, but this is only checked at the app level (not by Tendermint!)
@@ -49,7 +63,20 @@ import (
 // |-----------+------+---------+----------+-----------------|
 // | tx        | Tx   | nil     | true     | The transaction |
 func BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	err := mempool.CheckTx(tx, nil)
+	// _, msg, err := DecodeMessage(tx)
+	// if err != nil {
+	// 	fmt.Errorf("Error decoding message", "err", err)
+	// 	return nil, nil
+	// }
+	// switch msg := msg.(type) {
+	// 	case *(types.TxMessage):
+	// 		err = mempool.CheckTx(msg.Tx, types.RawTx, nil)
+	// 	case *(types.ParallelTxMessage):
+	// 		err = mempool.CheckTx(msg.Tx, types.ParallelTx, nil)
+	// 	case *(types.ParallelTxHashMessage):
+	// 		err = mempool.CheckTx(msg.Tx, types.ParallelTxHash, nil)
+	// }
+	err := mempool.CheckTx(tx, nil, types.RawTx, true, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Error broadcasting transaction: %v", err)
 	}
@@ -88,13 +115,37 @@ func BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 // | Parameter | Type | Default | Required | Description     |
 // |-----------+------+---------+----------+-----------------|
 // | tx        | Tx   | nil     | true     | The transaction |
-func BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+func BroadcastTxSync(tx types.Tx, txtype int32) (*ctypes.ResultBroadcastTx, error) {
 	resCh := make(chan *abci.Response, 1)
-	err := mempool.CheckTx(tx, func(res *abci.Response) {
+	// _, msg, err := DecodeMessage(tx)
+	// if err != nil {
+	// 	fmt.Errorf("Error decoding message", "err", err)
+	// 	return nil, nil
+	// }
+	// switch msg := msg.(type) {
+	// 	case *(types.TxMessage):
+	// 		txType = types.RawTx
+	// 		tx = msg.Tx
+	// 	case *(types.ParallelTxMessage):
+	// 		txType = types.ParallelTx
+	// 		tx = msg.Tx
+	// 	case *(types.ParallelTxHashMessage):
+	// 		txType = types.ParallelTxHash
+	// 		tx = msg.Tx
+	// }
+	err := mempool.CheckTx(tx, nil, txtype, true, func(res *abci.Response) {
 		resCh <- res
 	})
 	if err != nil {
 		return nil, fmt.Errorf("Error broadcasting transaction: %v", err)
+	}
+	if (txtype != types.RawTx) {
+		return &ctypes.ResultBroadcastTx{
+			Code: 0,
+			Data: nil,
+			Log:  "",
+			Hash: tx.Hash(),
+		}, nil		// TODO: check return value if ok
 	}
 	res := <-resCh
 	r := res.GetCheckTx()
@@ -149,7 +200,14 @@ func BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 // | Parameter | Type | Default | Required | Description     |
 // |-----------+------+---------+----------+-----------------|
 // | tx        | Tx   | nil     | true     | The transaction |
+// TODO: ptx dont need subscribe or wait include in block ...
 func BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
+	// _, msg, err := DecodeMessage(tx)
+	// if err != nil {
+	// 	fmt.Errorf("Error decoding message", "err", err)
+	// 	return nil, nil
+	// }
+	txType := types.RawTx
 	// subscribe to tx being committed in block
 	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
 	defer cancel()
@@ -165,12 +223,26 @@ func BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 
 	// broadcast the tx and register checktx callback
 	checkTxResCh := make(chan *abci.Response, 1)
-	err = mempool.CheckTx(tx, func(res *abci.Response) {
+	// switch msg := msg.(type) {
+	// 	case *(types.TxMessage):
+	// 		txType = types.RawTx
+	// 		tx = msg.Tx
+	// 	case *(types.ParallelTxMessage):
+	// 		txType = types.ParallelTx
+	// 		tx = msg.Tx
+	// 	case *(types.ParallelTxHashMessage):
+	// 		txType = types.ParallelTxHash
+	// 		tx = msg.Tx
+	// }
+	err = mempool.CheckTx(tx, nil, txType, true, func(res *abci.Response) {
 		checkTxResCh <- res
 	})
 	if err != nil {
 		logger.Error("Error on broadcastTxCommit", "err", err)
 		return nil, fmt.Errorf("Error on broadcastTxCommit: %v", err)
+	}
+	if (txType != types.RawTx) {
+		return nil, nil	//TODO: check return if ok
 	}
 	checkTxRes := <-checkTxResCh
 	checkTxR := checkTxRes.GetCheckTx()

@@ -72,8 +72,8 @@ func (Local) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
 	return core.BroadcastTxAsync(tx)
 }
 
-func (Local) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	return core.BroadcastTxSync(tx)
+func (Local) BroadcastTxSync(tx types.Tx, txType int32) (*ctypes.ResultBroadcastTx, error) {
+	return core.BroadcastTxSync(tx, txType)
 }
 
 func (Local) NetInfo() (*ctypes.ResultNetInfo, error) {

@@ -38,23 +38,30 @@ import (
 // 			}
 // 		],
 // 		"block_height": 5241
+//		"isproposer": false
 // 	},
 // 	"id": "",
 // 	"jsonrpc": "2.0"
 // }
 // ```
 func Validators(heightPtr *int64) (*ctypes.ResultValidators, error) {
+	isProposer := false
+	privAddr := consensusState.GetPrivAddress()
+	if (privAddr != nil) {
+		isProposer = consensusState.CheckIsProposer()
+		// TODO: if is fast sync, set to false
+	}
 	storeHeight := blockStore.Height()
 	height, err := getHeight(storeHeight, heightPtr)
 	if err != nil {
-		return nil, err
+		return &ctypes.ResultValidators{height, nil, isProposer}, err
 	}
 
 	validators, err := sm.LoadValidators(stateDB, height)
 	if err != nil {
-		return nil, err
+		return &ctypes.ResultValidators{height, nil, isProposer}, err
 	}
-	return &ctypes.ResultValidators{height, validators.Validators}, nil
+	return &ctypes.ResultValidators{height, validators.Validators, isProposer}, nil
 }
 
 // Dump consensus state.
@@ -90,3 +97,24 @@ func DumpConsensusState() (*ctypes.ResultDumpConsensusState, error) {
 	}
 	return &ctypes.ResultDumpConsensusState{consensusState.GetRoundState(), peerRoundStates}, nil
 }
+
+// func IsProposer(heightPtr *int64) (*ctypes.ResultIsProposer, error) {
+// 	if (*heightPtr >= 0) {
+// 		privAddr := consensusState.GetPrivAddress()
+// 		if (privAddr == nil) {
+// 			return &ctypes.ResultIsProposer{false}, nil
+// 		}
+// 		storeHeight := blockStore.Height()
+// 		height, err := getHeight(storeHeight, heightPtr)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+
+// 		validators, err := sm.LoadValidators(stateDB, height)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		return &ctypes.ResultIsProposer{bytes.Equal(validators.GetProposer().Address, privAddr)}, nil
+// 	}
+// 	return &ctypes.ResultIsProposer{consensusState.CheckIsProposer()}, nil
+// }

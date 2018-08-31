@@ -191,7 +191,7 @@ func (r *ABCIRecorder) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx,
 }
 
 func (r *ABCIRecorder) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	res, err := r.Client.BroadcastTxSync(tx)
+	res, err := r.Client.BroadcastTxSync(tx, types.RawTx)
 	r.addCall(Call{
 		Name:     "broadcast_tx_sync",
 		Args:     tx,

@@ -13,6 +13,7 @@ import (
 	"github.com/tendermint/tendermint/types"
 	dbm "github.com/tendermint/tmlibs/db"
 	"github.com/tendermint/tmlibs/log"
+	data "github.com/tendermint/go-wire/data"
 )
 
 var subscribeTimeout = 5 * time.Second
@@ -24,6 +25,8 @@ type Consensus interface {
 	GetState() sm.State
 	GetValidators() (int64, []*types.Validator)
 	GetRoundState() *cstypes.RoundState
+	CheckIsProposer() bool
+	GetPrivAddress() data.Bytes
 }
 
 type P2P interface {
