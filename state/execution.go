@@ -374,6 +374,7 @@ func updateState(s State, blockID types.BlockID, header *types.Header,
 		LastHeightConsensusParamsChanged: lastHeightParamsChanged,
 		LastResultsHash:                  abciResponses.ResultsHash(),
 		AppHash:                          nil,
+		LastBlockRandom:                  header.Random,
 	}, nil
 }
 

@@ -20,6 +20,7 @@ func (tm2pb) Header(header *Header) *types.Header {
 		LastCommitHash: header.LastCommitHash,
 		DataHash:       header.DataHash,
 		AppHash:        header.AppHash,
+		Random:         TM2PB.Random(header.Random),
 	}
 }
 
@@ -67,5 +68,12 @@ func (tm2pb) ConsensusParams(params *ConsensusParams) *types.ConsensusParams {
 		BlockGossip: &types.BlockGossip{
 			BlockPartSizeBytes: int32(params.BlockGossip.BlockPartSizeBytes),
 		},
+	}
+}
+
+func (tm2pb) Random(random VrfRandom) *types.VrfRandom {
+	return &types.VrfRandom{
+			Seed: random.Seed,
+			Proof: random.Proof,
 	}
 }

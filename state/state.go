@@ -34,6 +34,7 @@ type State struct {
 	LastBlockTotalTx int64
 	LastBlockID      types.BlockID
 	LastBlockTime    time.Time
+	LastBlockRandom  types.VrfRandom
 
 	// LastValidators is used to validate block.LastCommit.
 	// Validators are persisted to the database separately every time they change,
@@ -65,6 +66,7 @@ func (s State) Copy() State {
 		LastBlockTotalTx: s.LastBlockTotalTx,
 		LastBlockID:      s.LastBlockID,
 		LastBlockTime:    s.LastBlockTime,
+		LastBlockRandom:  s.LastBlockRandom,
 
 		Validators:                  s.Validators.Copy(),
 		LastValidators:              s.LastValidators.Copy(),
@@ -103,7 +105,7 @@ func (s State) GetValidators() (last *types.ValidatorSet, current *types.Validat
 // Create a block from the latest state
 
 // MakeBlock builds a block with the given txs and commit from the current state.
-func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
+func (s State) MakeBlockForProposer(proposer types.PrivValidator, height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
 	// build base block
 	block := types.MakeBlock(height, txs, commit)
 
@@ -115,8 +117,24 @@ func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit) (*t
 	block.AppHash = s.AppHash
 	block.ConsensusHash = s.ConsensusParams.Hash()
 	block.LastResultsHash = s.LastResultsHash
+	if proposer != nil {
+		if height == 1 {
+			block.Random = types.VrfRandom {
+				Seed: types.GENESIS_SEED,
+				Proof: types.GENESIS_PROOF,
+			}
+		} else {
+			privKey := proposer.GetPrivKey().Unwrap()
+			block.Random, _ = types.GenerateRandom(
+				privKey.RawBytes(), s.LastResultsHash, s.LastBlockRandom.Seed)
+		}
+	}
 
 	return block, block.MakePartSet(s.ConsensusParams.BlockGossip.BlockPartSizeBytes)
+}
+
+func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
+	return s.MakeBlockForProposer(nil, height, txs, commit)
 }
 
 //------------------------------------------------------------------------
@@ -175,6 +193,10 @@ func MakeGenesisState(genDoc *types.GenesisDoc) (State, error) {
 		LastBlockHeight: 0,
 		LastBlockID:     types.BlockID{},
 		LastBlockTime:   genDoc.GenesisTime,
+		LastBlockRandom: types.VrfRandom {
+			Seed: types.GENESIS_SEED,
+			Proof: types.GENESIS_PROOF,
+		},
 
 		Validators:                  types.NewValidatorSet(validators),
 		LastValidators:              types.NewValidatorSet(nil),

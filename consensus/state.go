@@ -983,7 +983,7 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 	// First generate CMPCTProposalBlock
 	if (compactBlock) {
 		ptxsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		cmpctBlock, cmpctBlockParts := cs.state.MakeBlock(cs.Height, ptxsHash, commit)
+		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(cs.privValidator, cs.Height, ptxsHash, commit)
 		evidence := cs.evpool.PendingEvidence()
 		cmpctBlock.AddEvidence(evidence)
 		block = cmpctBlock
@@ -991,7 +991,7 @@ func (cs *ConsensusState) createProposalBlock() (block *types.Block, blockParts 
 		return block, blockParts, cmpctBlock, cmpctBlockParts
 	} else {
 		ptxs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		block, blockParts := cs.state.MakeBlock(cs.Height, ptxs, commit)
+		block, blockParts := cs.state.MakeBlockForProposer(cs.privValidator, cs.Height, ptxs, commit)
 		evidence := cs.evpool.PendingEvidence()
 		block.AddEvidence(evidence)
 		cmpctBlock = block

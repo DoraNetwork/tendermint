@@ -171,6 +171,9 @@ type Header struct {
 
 	// consensus info
 	EvidenceHash data.Bytes `json:"evidence_hash"` // evidence included in the block
+
+	// VRF random
+	Random VrfRandom `json:"vrf_random"`
 }
 
 // Hash returns the hash of the header.
@@ -193,6 +196,7 @@ func (h *Header) Hash() data.Bytes {
 		"Consensus":   h.ConsensusHash,
 		"Results":     h.LastResultsHash,
 		"Evidence":    h.EvidenceHash,
+		"Random":      h.Random,
 	})
 }
 
@@ -215,6 +219,7 @@ func (h *Header) StringIndented(indent string) string {
 %s  Conensus:       %v
 %s  Results:        %v
 %s  Evidence:       %v
+%s  Random:         %v
 %s}#%v`,
 		indent, h.ChainID,
 		indent, h.Height,
@@ -229,6 +234,7 @@ func (h *Header) StringIndented(indent string) string {
 		indent, h.ConsensusHash,
 		indent, h.LastResultsHash,
 		indent, h.EvidenceHash,
+		indent, h.Random,
 		indent, h.Hash())
 }
 

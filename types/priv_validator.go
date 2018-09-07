@@ -40,6 +40,7 @@ func voteToStep(vote *Vote) int8 {
 type PrivValidator interface {
 	GetAddress() data.Bytes // redundant since .PubKey().Address()
 	GetPubKey() crypto.PubKey
+	GetPrivKey() crypto.PrivKey
 
 	SignVote(chainID string, vote *Vote) error
 	SignProposal(chainID string, proposal *Proposal) error
@@ -106,10 +107,16 @@ func (pv *PrivValidatorFS) GetPubKey() crypto.PubKey {
 	return pv.PubKey
 }
 
+// GetPrivKey returns the private key of the validator.
+// Implements PrivValidator.
+func (pv *PrivValidatorFS) GetPrivKey() crypto.PrivKey {
+	return pv.PrivKey
+}
+
 // GenPrivValidatorFS generates a new validator with randomly generated private key
 // and sets the filePath, but does not call Save().
 func GenPrivValidatorFS(filePath string) *PrivValidatorFS {
-	privKey := crypto.GenPrivKeyEd25519().Wrap()
+	privKey := crypto.GenPrivKeySecp256k1().Wrap()
 	return &PrivValidatorFS{
 		Address:  privKey.PubKey().Address(),
 		PubKey:   privKey.PubKey(),
