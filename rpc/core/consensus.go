@@ -47,12 +47,12 @@ import (
 func Validators(heightPtr *int64) (*ctypes.ResultValidators, error) {
 	isProposer := false
 	privAddr := consensusState.GetPrivAddress()
-	if (privAddr != nil) {
-		isProposer = consensusState.CheckIsProposer()
-		// TODO: if is fast sync, set to false
-	}
 	storeHeight := blockStore.Height()
 	height, err := getHeight(storeHeight, heightPtr)
+	if (privAddr != nil) {
+		isProposer = consensusState.CheckIsProposer(height)
+		// TODO: if is fast sync, set to false
+	}
 	if err != nil {
 		return &ctypes.ResultValidators{height, nil, isProposer}, err
 	}

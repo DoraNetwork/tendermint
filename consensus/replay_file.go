@@ -245,7 +245,7 @@ func (pb *playback) replayConsoleLoop() int {
 			// "rs short" -> print height/round/step
 			// "rs <field>" -> print another field of the round state
 
-			rs := pb.cs.RoundState
+			rs := pb.cs.GetRoundStateAtHeight(pb.cs.state.LastBlockHeight)
 			if len(tokens) == 1 {
 				fmt.Println(rs)
 			} else {

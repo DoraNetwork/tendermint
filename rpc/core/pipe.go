@@ -25,7 +25,7 @@ type Consensus interface {
 	GetState() sm.State
 	GetValidators() (int64, []*types.Validator)
 	GetRoundState() *cstypes.RoundState
-	CheckIsProposer() bool
+	CheckIsProposer(int64) bool
 	GetPrivAddress() data.Bytes
 }
 

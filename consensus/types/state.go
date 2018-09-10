@@ -16,12 +16,16 @@ type RoundStepType uint8 // These must be numeric, ordered.
 const (
 	RoundStepNewHeight     = RoundStepType(0x01) // Wait til CommitTime + timeoutCommit
 	RoundStepNewRound      = RoundStepType(0x02) // Setup new round and go to RoundStepPropose
-	RoundStepPropose       = RoundStepType(0x03) // Did propose, gossip proposal
-	RoundStepPrevote       = RoundStepType(0x04) // Did prevote, gossip prevotes
-	RoundStepPrevoteWait   = RoundStepType(0x05) // Did receive any +2/3 prevotes, start timeout
-	RoundStepPrecommit     = RoundStepType(0x06) // Did precommit, gossip precommits
-	RoundStepPrecommitWait = RoundStepType(0x07) // Did receive any +2/3 precommits, start timeout
-	RoundStepCommit        = RoundStepType(0x08) // Entered commit state machine
+	RoundStepWaitToPropose = RoundStepType(0x03) // Wait previous height to enter prevote
+	RoundStepPropose       = RoundStepType(0x04) // Did propose, gossip proposal
+	RoundStepWaitToPrevote = RoundStepType(0x05) // Wait previous height to enter precommit
+	RoundStepPrevote       = RoundStepType(0x06) // Did prevote, gossip prevotes
+	RoundStepPrevoteWait   = RoundStepType(0x07) // Did receive any +2/3 prevotes, start timeout
+	RoundStepWaitToPrecommit = RoundStepType(0x08) // Wait previous height to enter commit
+	RoundStepPrecommit     = RoundStepType(0x09) // Did precommit, gossip precommits
+	RoundStepPrecommitWait = RoundStepType(0x0a) // Did receive any +2/3 precommits, start timeout
+	RoundStepWaitToCommit  = RoundStepType(0x0b) // Wait previous height to finish commit
+	RoundStepCommit        = RoundStepType(0x0c) // Entered commit state machine
 	// NOTE: RoundStepNewHeight acts as RoundStepCommitWait.
 )
 
@@ -32,12 +36,18 @@ func (rs RoundStepType) String() string {
 		return "RoundStepNewHeight"
 	case RoundStepNewRound:
 		return "RoundStepNewRound"
+	case RoundStepWaitToPropose:
+		return "RoundStepWaitToPropose"
 	case RoundStepPropose:
 		return "RoundStepPropose"
+	case RoundStepWaitToPrevote:
+		return "RoundStepWaitToPrevote"
 	case RoundStepPrevote:
 		return "RoundStepPrevote"
 	case RoundStepPrevoteWait:
 		return "RoundStepPrevoteWait"
+	case RoundStepWaitToPrecommit:
+		return "RoundStepWaitToPrecommit"
 	case RoundStepPrecommit:
 		return "RoundStepPrecommit"
 	case RoundStepPrecommitWait:
@@ -132,4 +142,18 @@ func (rs *RoundState) StringIndented(indent string) string {
 func (rs *RoundState) StringShort() string {
 	return fmt.Sprintf(`RoundState{H:%v R:%v S:%v ST:%v}`,
 		rs.Height, rs.Round, rs.Step, rs.StartTime)
+}
+
+func (rs *RoundState) IsProposalComplete() bool {
+	if rs.Proposal == nil || rs.ProposalBlock == nil {
+		return false
+	}
+	// we have the proposal. if there's a POLRound,
+	// make sure we have the prevotes from it too
+	if rs.Proposal.POLRound < 0 {
+		return true
+	} else {
+		// if this is false the proposer is lying or we haven't received the POL yet
+		return rs.Votes.Prevotes(rs.Proposal.POLRound).HasTwoThirdsMajority()
+	}
 }

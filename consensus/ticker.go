@@ -9,6 +9,8 @@ import (
 
 var (
 	tickTockBufferSize = 10
+	// Global tock channel to receive all timeouts
+	gTockChan = make(chan timeoutInfo, tickTockBufferSize)
 )
 
 // TimeoutTicker is a timer that schedules timeouts
@@ -41,7 +43,7 @@ func NewTimeoutTicker() TimeoutTicker {
 	tt := &timeoutTicker{
 		timer:    time.NewTimer(0),
 		tickChan: make(chan timeoutInfo, tickTockBufferSize),
-		tockChan: make(chan timeoutInfo, tickTockBufferSize),
+		tockChan: gTockChan,
 	}
 	tt.BaseService = *cmn.NewBaseService(nil, "TimeoutTicker", tt)
 	tt.stopTimer() // don't want to fire until the first scheduled timeout
@@ -122,11 +124,14 @@ func (t *timeoutTicker) timeoutRoutine() {
 			t.Logger.Debug("Scheduled timeout", "dur", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
 		case <-t.timer.C:
 			t.Logger.Info("Timed out", "dur", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
-			// go routine here guarantees timeoutRoutine doesn't block.
-			// Determinism comes from playback in the receiveRoutine.
-			// We can eliminate it by merging the timeoutRoutine into receiveRoutine
-			//  and managing the timeouts ourselves with a millisecond ticker
-			go func(toi timeoutInfo) { t.tockChan <- toi }(ti)
+			// FIXME: Sometimes there'll come a timeout with zero height
+			if ti.Height > 0 {
+				// go routine here guarantees timeoutRoutine doesn't block.
+				// Determinism comes from playback in the receiveRoutine.
+				// We can eliminate it by merging the timeoutRoutine into receiveRoutine
+				//  and managing the timeouts ourselves with a millisecond ticker
+				go func(toi timeoutInfo) { t.tockChan <- toi }(ti)
+			}
 		case <-t.Quit:
 			return
 		}

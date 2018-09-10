@@ -242,12 +242,7 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 			ps.ApplyHasVoteMessage(msg)
 		case *VoteSetMaj23Message:
 			cs := conR.conS
-			cs.mtx.Lock()
-			height, votes := cs.Height, cs.Votes
-			cs.mtx.Unlock()
-			if height != msg.Height {
-				return
-			}
+			votes := cs.GetVotesAtHeight(msg.Height)
 			// Peer claims to have a maj23 for some BlockID at H,R,S,
 			votes.SetPeerMaj23(msg.Round, msg.Type, ps.Peer.Key(), msg.BlockID)
 			// Respond with a VoteSetBitsMessage showing which votes we have.
@@ -307,9 +302,9 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 		switch msg := msg.(type) {
 		case *VoteMessage:
 			cs := conR.conS
-			cs.mtx.Lock()
-			height, valSize, lastCommitSize := cs.Height, cs.Validators.Size(), cs.LastCommit.Size()
-			cs.mtx.Unlock()
+			height := msg.Vote.Height
+			valSize := cs.GetValidatorSize(height)
+			lastCommitSize := cs.GetLastCommitSize(height)
 			ps.EnsureVoteBitArrays(height, valSize)
 			ps.EnsureVoteBitArrays(height-1, lastCommitSize)
 			ps.SetHasVote(msg.Vote)
@@ -329,25 +324,19 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 		switch msg := msg.(type) {
 		case *VoteSetBitsMessage:
 			cs := conR.conS
-			cs.mtx.Lock()
-			height, votes := cs.Height, cs.Votes
-			cs.mtx.Unlock()
+			votes := cs.GetVotesAtHeight(msg.Height)
 
-			if height == msg.Height {
-				var ourVotes *cmn.BitArray
-				switch msg.Type {
-				case types.VoteTypePrevote:
-					ourVotes = votes.Prevotes(msg.Round).BitArrayByBlockID(msg.BlockID)
-				case types.VoteTypePrecommit:
-					ourVotes = votes.Precommits(msg.Round).BitArrayByBlockID(msg.BlockID)
-				default:
-					conR.Logger.Error("Bad VoteSetBitsMessage field Type")
-					return
-				}
-				ps.ApplyVoteSetBitsMessage(msg, ourVotes)
-			} else {
-				ps.ApplyVoteSetBitsMessage(msg, nil)
+			var ourVotes *cmn.BitArray
+			switch msg.Type {
+			case types.VoteTypePrevote:
+				ourVotes = votes.Prevotes(msg.Round).BitArrayByBlockID(msg.BlockID)
+			case types.VoteTypePrecommit:
+				ourVotes = votes.Precommits(msg.Round).BitArrayByBlockID(msg.BlockID)
+			default:
+				conR.Logger.Error("Bad VoteSetBitsMessage field Type")
+				return
 			}
+			ps.ApplyVoteSetBitsMessage(msg, ourVotes)
 		default:
 			// don't punish (leave room for soft upgrades)
 			conR.Logger.Error(cmn.Fmt("Unknown message type %v", reflect.TypeOf(msg)))
@@ -1292,6 +1281,7 @@ const (
 	msgTypeCMPCTBlockPart  = byte(0x18)
 
 	msgTypeProposalHeartbeat = byte(0x20)
+	msgTypeStateTransition   = byte(0x21)
 )
 
 // ConsensusMessage is a message that can be sent and received on the ConsensusReactor
@@ -1310,6 +1300,7 @@ var _ = wire.RegisterInterface(
 	wire.ConcreteType{&VoteSetMaj23Message{}, msgTypeVoteSetMaj23},
 	wire.ConcreteType{&VoteSetBitsMessage{}, msgTypeVoteSetBits},
 	wire.ConcreteType{&ProposalHeartbeatMessage{}, msgTypeProposalHeartbeat},
+	wire.ConcreteType{&StateTransitionMessage{}, msgTypeStateTransition},
 )
 
 // DecodeMessage decodes the given bytes into a ConsensusMessage.
@@ -1471,4 +1462,17 @@ type ProposalHeartbeatMessage struct {
 // String returns a string representation.
 func (m *ProposalHeartbeatMessage) String() string {
 	return fmt.Sprintf("[HEARTBEAT %v]", m.Heartbeat)
+}
+
+//-------------------------------------
+
+// StateTransitionMessage is sent to signal pipeline to move forward.
+type StateTransitionMessage struct {
+	Height int64
+	Type   cstypes.RoundStepType
+}
+
+// String returns a string representation.
+func (m *StateTransitionMessage) String() string {
+	return fmt.Sprintf("[StateTransition %v/%v]", m.Height, m.Type)
 }

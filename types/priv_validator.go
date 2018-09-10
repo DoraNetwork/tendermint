@@ -264,24 +264,24 @@ func (privVal *PrivValidatorFS) signBytesHRS(height int64, round int, step int8,
 	signBytes []byte, checkFn checkOnlyDifferByTimestamp) (crypto.Signature, error) {
 	sig := crypto.Signature{}
 
-	sameHRS, err := privVal.checkHRS(height, round, step)
-	if err != nil {
-		return sig, err
-	}
+	// sameHRS, err := privVal.checkHRS(height, round, step)
+	// if err != nil {
+	// 	return sig, err
+	// }
 
 	// We might crash before writing to the wal,
 	// causing us to try to re-sign for the same HRS
-	if sameHRS {
+	// if sameHRS {
 		// if they're the same or only differ by timestamp,
 		// return the LastSignature. Otherwise, error
-		if bytes.Equal(signBytes, privVal.LastSignBytes) ||
-			checkFn(privVal.LastSignBytes, signBytes) {
-			return privVal.LastSignature, nil
-		}
-		return sig, fmt.Errorf("Conflicting data")
-	}
+		// if bytes.Equal(signBytes, privVal.LastSignBytes) ||
+		// 	checkFn(privVal.LastSignBytes, signBytes) {
+		// 	return privVal.LastSignature, nil
+		// }
+		// return sig, fmt.Errorf("Conflicting data")
+	// }
 
-	sig, err = privVal.Sign(signBytes)
+	sig, err := privVal.Sign(signBytes)
 	if err != nil {
 		return sig, err
 	}
