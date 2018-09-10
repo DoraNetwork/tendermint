@@ -250,6 +250,10 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	for h := range cs.roundStates {
 		if h > height {
 			delete(cs.roundStates, h)
+			// restore txs back into mempool
+			cs.mempool.Lock()
+			cs.mempool.Restore(height)
+			cs.mempool.Unlock()
 		}
 	}
 }
@@ -1869,6 +1873,12 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		// NOTE: it's possible to receive complete proposal blocks for future rounds without having the proposal
 		cs.Logger.Info("Received complete proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
+
+		// Move txs in this block into uncommited txs map
+		cs.mempool.Lock()
+		cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
+		cs.mempool.Unlock()
+
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step

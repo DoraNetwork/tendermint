@@ -26,6 +26,7 @@ type Mempool interface {
 	CheckTx(Tx, CommonHash, int32, bool, func(*abci.Response)) error
 	Reap(int) Txs
 	Update(height int64, txs Txs) error
+	Restore(height int64)
 	Flush()
 
 	TxsAvailable() <-chan int64
@@ -48,6 +49,7 @@ func (m MockMempool) Size() int                                               { 
 func (m MockMempool) CheckTx(tx Tx, hash CommonHash, flag int32, local bool, cb func(*abci.Response)) error { return nil }
 func (m MockMempool) Reap(n int) Txs                                          { return Txs{} }
 func (m MockMempool) Update(height int64, txs Txs) error                      { return nil }
+func (m MockMempool) Restore(height int64)                      			  {}
 func (m MockMempool) Flush()                                                  {}
 func (m MockMempool) TxsAvailable() <-chan int64                              { return make(chan int64) }
 func (m MockMempool) EnableTxsAvailable()                                     {}

@@ -87,6 +87,9 @@ type Mempool struct {
 	wal *auto.AutoFile
 
 	logger log.Logger
+
+	// Keep track of uncommitted transactions
+	unCommittedTxs       map[int64]([]*mempoolTx)
 }
 
 // NewMempool returns a new Mempool with the given configuration and connection to an application.
@@ -107,6 +110,7 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		recheckEnd:    nil,
 		logger:        log.NewNopLogger(),
 		cache:         newTxCache(cacheSize),
+		unCommittedTxs: make(map[int64]([]*mempoolTx)),
 	}
 	mempool.initWAL()
 	mempool.fetchingTx = make([][]byte, 0)
@@ -542,6 +546,13 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	if err := mem.proxyAppConn.FlushSync(); err != nil { // To flush async resCb calls e.g. from CheckTx
 		return err
 	}
+
+	// Check whether txs have been moved into uncommited txs map
+	if _, ok := mem.unCommittedTxs[height]; ok {
+		delete(mem.unCommittedTxs, height)
+		return nil
+	}
+
 	txsMap := make(map[string]struct{})
 	if (usePtxHash) {
 		// First, create a lookup map of txns in new txs.
@@ -579,7 +590,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	mem.notifiedTxsAvailable = false
 
 	// Remove transactions that are already in txs.
-	goodTxs := mem.filterTxs(txsMap)
+	goodTxs := mem.filterTxs(height, txsMap)
 	// Recheck mempool txs if any txs were committed in the block
 	// NOTE/XXX: in some apps a tx could be invalidated due to EndBlock,
 	//	so we really still do need to recheck, but this is for debugging
@@ -605,13 +616,16 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 }
 
 // Note: remove the tx in txs from blockTxsMap
-func (mem *Mempool) filterTxs(blockTxsMap map[string]struct{}) []types.Tx {
+func (mem *Mempool) filterTxs(height int64, blockTxsMap map[string]struct{}) []types.Tx {
 	goodTxs := make([]types.Tx, 0, mem.txs.Len())
+	removedTxs := make([]*mempoolTx, 0, mem.txs.Len())
 	mem.logger.Info("Before update mempool, tx size", mem.txs.Len())
 	for e := mem.txs.Front(); e != nil; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
 		// Remove the tx if it's alredy in a block.
 		if _, ok := blockTxsMap[string(memTx.tx)]; ok {
+			// save removed txs
+			removedTxs = append(removedTxs, memTx)
 			// remove from clist
 			mem.txs.Remove(e)
 			e.DetachPrev()
@@ -622,6 +636,12 @@ func (mem *Mempool) filterTxs(blockTxsMap map[string]struct{}) []types.Tx {
 		// Good tx!
 		goodTxs = append(goodTxs, memTx.tx)
 	}
+
+	// save into uncommitted txs map
+	if len(removedTxs) > 0 {
+		mem.unCommittedTxs[height] = removedTxs
+	}
+
 	mem.logger.Info("After update mempool, tx size", mem.txs.Len())
 	return goodTxs
 }
@@ -641,6 +661,17 @@ func (mem *Mempool) recheckTxs(goodTxs []types.Tx) {
 		mem.proxyAppConn.CheckTxAsync(abci.RequestCheckTx{Tx: tx, Local: false})
 	}
 	mem.proxyAppConn.FlushAsync()
+}
+
+// Restore txs back to mempool when rolling back pipeline
+// NOTE: unsafe; Lock/Unlock must be managed by caller
+func (mem *Mempool) Restore(height int64) {
+	if txs, ok := mem.unCommittedTxs[height]; ok {
+		size := len(txs)
+		for i := 0; i < size; i++ {
+			mem.txs.PushBack(txs[i])
+		}
+	}
 }
 
 //--------------------------------------------------------------------------------
