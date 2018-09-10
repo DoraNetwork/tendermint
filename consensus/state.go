@@ -46,6 +46,7 @@ var (
 
 var (
 	msgQueueSize = 1000
+	initialHeight = int64(1)
 	compactBlock = true
 	buildFullBlock = false	// use compact block build full block with raw tx
 	broadcastPtxHash = true
@@ -352,6 +353,7 @@ func (cs *ConsensusState) OnStart() error {
 
 	// schedule the first 4 rounds!
 	// use GetRoundState so we don't race the receiveRoutine for access
+	initialHeight = cs.state.LastBlockHeight + 1
 	for i := 1; i <= 4; i++ {
 		cs.scheduleRound0(cs.GetRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
 	}
@@ -1024,7 +1026,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 }
 
 func (cs *ConsensusState) canEnterPropose(height int64) bool {
-	if height == 1 {
+	if height == initialHeight {
 			return true
 	}
 
@@ -1136,9 +1138,13 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 			// Make the commit from LastCommit
 			commit = lastCommit.MakeCommit()
 		} else {
-			// This shouldn't happen.
-			cs.Logger.Error("enterPropose: Cannot propose anything: No commit for the previous block.")
-			return
+			// Load commit from blockstore if it's not available
+			commit = cs.LoadCommit(height - 4)
+			if commit == nil {
+				// This shouldn't happen.
+				cs.Logger.Error("enterPropose: Cannot propose anything: No commit for the previous block.")
+				return
+			}
 		}
 	}
 
@@ -1228,7 +1234,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 }
 
 func (cs *ConsensusState) canEnterPrevote(height int64) bool {
-	if height == 1 {
+	if height == initialHeight {
 		return true
 	}
 
@@ -1439,7 +1445,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 }
 
 func (cs *ConsensusState) canEnterPrecommit(height int64) bool {
-	if height == 1 {
+	if height == initialHeight {
 		return true
 	}
 
@@ -1560,7 +1566,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 }
 
 func (cs *ConsensusState) canEnterCommit(height int64) bool {
-	if height == 1 {
+	if height == initialHeight {
 		return true
 	}
 
