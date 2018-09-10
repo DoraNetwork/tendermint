@@ -69,6 +69,13 @@ func (ti *timeoutInfo) String() string {
 	return fmt.Sprintf("%v ; %d/%d %v", ti.Duration, ti.Height, ti.Round, ti.Step)
 }
 
+type handleRoutine struct {
+	id       int              // equals to (height % 4)
+	quit     chan struct{}    // channel to receive quit signal
+	msgQueue chan msgInfo     // channel to receive peer/internal messages
+	tockChan chan timeoutInfo // channel to receive timeout info
+}
+
 // ConsensusState handles execution of the consensus algorithm.
 // It processes votes and proposals, and upon reaching agreement,
 // commits blocks to the chain and executes them against the application.
@@ -97,6 +104,7 @@ type ConsensusState struct {
 	peerMsgQueue     chan msgInfo
 	internalMsgQueue chan msgInfo
 	timeoutTicker    TimeoutTicker
+	msgHandlers      [4]handleRoutine
 
 	// we use eventBus to trigger msg broadcasts in the reactor,
 	// and to notify external subscribers, eg. through a websocket
@@ -336,6 +344,9 @@ func (cs *ConsensusState) OnStart() error {
 		// }
 	}
 
+	// start message handlers
+	cs.startMsgHandlers()
+
 	// now start the receiveRoutine
 	go cs.receiveRoutine(0)
 
@@ -539,55 +550,6 @@ func (cs *ConsensusState) updateToState(state sm.State) {
 	}
 
 	cs.state = state
-
-	// Reset fields based on state.
-	validators := state.Validators
-	lastPrecommits := (*types.VoteSet)(nil)
-	if state.LastBlockHeight > 0 {
-		rs := cs.GetRoundStateAtHeight(state.LastBlockHeight)
-		if rs.CommitRound > -1 && rs.Votes != nil {
-			if !rs.Votes.Precommits(rs.CommitRound).HasTwoThirdsMajority() {
-				cmn.PanicSanity("updateToState(state) called but last Precommit round didn't have +2/3")
-			}
-			lastPrecommits = rs.Votes.Precommits(rs.CommitRound)
-		}
-	}
-
-	// Next desired block height
-	height := state.LastBlockHeight + 1
-	rs := cs.GetRoundStateAtHeight(height)
-
-	// RoundState fields
-	cs.updateHeight(height)
-	cs.updateRoundStep(height, 0, cstypes.RoundStepNewHeight)
-	if rs.CommitTime.IsZero() {
-		// "Now" makes it easier to sync up dev nodes.
-		// We add timeoutCommit to allow transactions
-		// to be gathered for the first block.
-		// And alternative solution that relies on clocks:
-		//  cs.StartTime = state.LastBlockTime.Add(timeoutCommit)
-		rs.StartTime = cs.config.Commit(time.Now())
-	} else {
-		rs.StartTime = cs.config.Commit(rs.CommitTime)
-	}
-	rs.Validators = validators
-	rs.Proposal = nil
-	rs.ProposalBlock = nil
-	rs.ProposalBlockParts = nil
-	rs.ProposalCMPCTBlock = nil
-	rs.ProposalCMPCTBlockParts = nil
-	rs.LockedRound = 0
-	rs.LockedBlock = nil
-	rs.LockedBlockParts = nil
-	rs.LockedCMPCTBlock = nil
-	rs.LockedCMPCTBlockParts = nil
-	rs.Votes = cstypes.NewHeightVoteSet(state.ChainID, height, validators)
-	rs.CommitRound = -1
-	rs.LastCommit = lastPrecommits
-	rs.LastValidators = state.LastValidators
-
-	// Finally, broadcast RoundState
-	cs.newStep(height)
 }
 
 func (cs *ConsensusState) RoundStateEvent(height int64) types.EventDataRoundState {
@@ -640,16 +602,16 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 			cs.wal.Save(mi)
 			// handles proposals, block parts, votes
 			// may generate internal events (votes, complete proposals, 2/3 majorities)
-			cs.handleMsg(mi)
+			cs.dispatchMsg(mi)
 		case mi = <-cs.internalMsgQueue:
 			cs.wal.Save(mi)
 			// handles proposals, block parts, votes
-			cs.handleMsg(mi)
+			cs.dispatchMsg(mi)
 		case ti := <-cs.timeoutTicker.Chan(): // tockChan:
 			cs.wal.Save(ti)
 			// if the timeout is relevant to the rs
 			// go to the next step
-			cs.handleTimeout(ti)
+			cs.dispatchTimeout(ti)
 		case <-cs.Quit:
 
 			// NOTE: the internalMsgQueue may have signed messages from our
@@ -660,6 +622,72 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 			cs.wal.Stop()
 
 			close(cs.done)
+			return
+		}
+	}
+}
+
+func (cs *ConsensusState) dispatchMsg(mi msgInfo) {
+	msg := mi.Msg
+	var handler *handleRoutine
+	switch msg := msg.(type) {
+	case *ProposalMessage:
+		handler = &cs.msgHandlers[msg.Proposal.Height % 4]
+	case *BlockPartMessage:
+		handler = &cs.msgHandlers[msg.Height % 4]
+	case *CMPCTBlockPartMessage:
+		handler = &cs.msgHandlers[msg.Height % 4]
+	case *VoteMessage:
+		handler = &cs.msgHandlers[msg.Vote.Height % 4]
+	case *StateTransitionMessage:
+		handler = &cs.msgHandlers[(msg.Height+1) % 4]
+	default:
+		cs.Logger.Error("Non-dispatchable msg type", reflect.TypeOf(msg))
+	}
+
+	if handler != nil {
+		cs.Logger.Debug("Dispatch message", "handler", handler.id, "msg", msg)
+		select {
+		case handler.msgQueue <- mi:
+		default:
+			cs.Logger.Info("Handler msg queue is full")
+			go func() { handler.msgQueue <- mi }()
+		}
+	}
+}
+
+func (cs *ConsensusState) dispatchTimeout(ti timeoutInfo) {
+	cs.Logger.Debug("Dispatch timeout", "handler", ti.Height % 4, "ti", ti)
+	handler := cs.msgHandlers[ti.Height % 4]
+	select {
+	case handler.tockChan <- ti:
+	default:
+		cs.Logger.Info("Handler tock chan is full")
+		go func() { handler.tockChan <- ti }()
+	}
+}
+
+func (cs *ConsensusState) startMsgHandlers() {
+	for i := 0; i < 4; i++ {
+		cs.msgHandlers[i] = handleRoutine {
+			id: i,
+			quit: make(chan struct{}),
+			msgQueue: make(chan msgInfo, msgQueueSize),
+			tockChan: make(chan timeoutInfo, tickTockBufferSize),
+		}
+		go cs.startHandleRoutine(i)
+	}
+}
+
+func (cs *ConsensusState) startHandleRoutine(index int) {
+	hr := cs.msgHandlers[index]
+	for {
+		select {
+		case mi := <-hr.msgQueue:
+			cs.handleMsg(mi)
+		case ti := <-hr.tockChan:
+			cs.handleTimeout(ti)
+		case <-hr.quit:
 			return
 		}
 	}
@@ -1158,6 +1186,11 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 	}
 	types.RcenterPrevote()
 
+	if rs.Step < cstypes.RoundStepPropose {
+		cs.Logger.Debug("Not ready to enter prevote")
+		return
+	}
+
 	defer func() {
 		if cs.canEnterPrevote(height) {
 			// Done enterPrevote:
@@ -1212,6 +1245,7 @@ func (cs *ConsensusState) canEnterPrevote(height int64) bool {
 }
 
 func (cs *ConsensusState) enterWaitToPrevote(height int64, round int) {
+	cs.Logger.Debug("enterWaitToPrevote:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToPrevote)
 	cs.newStep(height)
 }
@@ -1284,6 +1318,11 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		return
 	}
 	types.RcenterPrecommit()
+
+	if rs.Step < cstypes.RoundStepPrevote {
+		cs.Logger.Debug("Not ready to enter precommit")
+		return
+	}
 
 	cs.Logger.Info(cmn.Fmt("enterPrecommit(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
@@ -1405,6 +1444,7 @@ func (cs *ConsensusState) canEnterPrecommit(height int64) bool {
 }
 
 func (cs *ConsensusState) enterWaitToPrecommit(height int64, round int) {
+	cs.Logger.Debug("enterWaitToPrecommit:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToPrecommit)
 	cs.newStep(height)
 }
@@ -1439,6 +1479,12 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
 		return
 	}
+
+	if rs.Step < cstypes.RoundStepPrecommit {
+		cs.Logger.Debug("Not ready to enter commit")
+		return
+	}
+
 	types.RcenterCommit()
 	cs.Logger.Info(cmn.Fmt("enterCommit(%v/%v). Current: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
 
@@ -1515,6 +1561,7 @@ func (cs *ConsensusState) canEnterCommit(height int64) bool {
 }
 
 func (cs *ConsensusState) enterWaitToCommit(height int64, round int) {
+	cs.Logger.Debug("enterWaitToCommit:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToCommit)
 	cs.newStep(height)
 }
@@ -1625,6 +1672,9 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	cs.updateToState(stateCopy)
 
 	fail.Fail() // XXX
+
+	// stop round state timer
+	rs.timeoutTicker.Stop()
 
 	// clear useless round states
 	cs.truncateRoundStates()
