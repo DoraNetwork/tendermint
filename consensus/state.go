@@ -236,7 +236,25 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 	}
 }
 
-// Should be invoked within mutex protection
+func (cs *ConsensusState) startNewRound(height int64, round int) {
+	cs.enterNewRound(height, round+1)
+	for i := 1; i <= 3; i++ {
+		cs.scheduleRound0(cs.GetRoundStateAtHeight(height + int64(i)))
+	}
+}
+
+// reset round state, roll back pipeline
+func (cs *ConsensusState) resetRoundState(height int64, round int) {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+	for h := range cs.roundStates {
+		if h > height {
+			delete(cs.roundStates, h)
+		}
+	}
+}
+
+// GetRoundStateAtHeight Should be invoked within mutex protection
 func (cs *ConsensusState) GetRoundStateAtHeight(height int64) *RoundStateWrapper {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
@@ -805,9 +823,10 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
 		cs.enterPrecommit(ti.Height, ti.Round)
 	case cstypes.RoundStepPrecommitWait:
-		// TODO: rollback the pipeline
-		// cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
-		// cs.enterNewRound(ti.Height, ti.Round+1)
+		// rollback the pipeline
+		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
+		cs.resetRoundState(ti.Height, ti.Round)
+		cs.startNewRound(ti.Height, ti.Round)
 	default:
 		panic(cmn.Fmt("Invalid timeout step: %v", ti.Step))
 	}
@@ -2082,7 +2101,9 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 			blockID, ok := precommits.TwoThirdsMajority()
 			if ok {
 				if len(blockID.Hash) == 0 {
-					cs.enterNewRound(height, vote.Round+1)
+					// reset pbft pipeline
+					cs.resetRoundState(height, vote.Round)
+					cs.startNewRound(height, vote.Round)
 				} else {
 					cs.enterNewRound(height, vote.Round)
 					cs.enterPrecommit(height, vote.Round)
