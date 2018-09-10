@@ -1095,6 +1095,12 @@ func (cs *ConsensusState) canEnterPropose(height int64) bool {
 	if preRs.Step < cstypes.RoundStepPrevote {
 			return false
 	}
+
+	// Previous height's proposal not available, wait
+	if !preRs.IsProposalComplete() {
+		return false
+	}
+
 	return true
 }
 
@@ -1886,6 +1892,8 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		} else if rs.Step == cstypes.RoundStepCommit {
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(height)
+			// Trigger next height to enter propose step
+			cs.notifyStateTransition(height, cstypes.RoundStepPrevote)
 		}
 		return true, err
 	}
