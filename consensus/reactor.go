@@ -184,8 +184,9 @@ func (conR *ConsensusReactor) AddPeer(peer p2p.Peer) {
 
 	// Begin routines for this peer.
 	go conR.gossipDataRoutine(peer, peerState)
-	go conR.gossipVotesRoutine(peer, peerState)
-	go conR.queryMaj23Routine(peer, peerState)
+	// TODO: Disable gossip temp to fix crash issue
+	// go conR.gossipVotesRoutine(peer, peerState)
+	// go conR.queryMaj23Routine(peer, peerState)
 
 	// Send our state to peer.
 	// If we're fast_syncing, broadcast a RoundStepMessage later upon SwitchToConsensus().

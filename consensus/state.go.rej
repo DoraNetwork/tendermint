@@ -1,0 +1,18 @@
+diff a/consensus/state.go b/consensus/state.go	(rejected hunks)
+@@ -1019,8 +1022,14 @@ func (cs *ConsensusState) enterWaitToPropose(height int64, round int) {
+ }
+ 
+ func (cs *ConsensusState) isProposer(height int64) bool {
+-	rs := cs.GetRoundStateAtHeight(height)
+-	return bytes.Equal(rs.Validators.GetProposer().Address, cs.privValidator.GetAddress())
++	rsValidators := cs.state.Validators
++	// Use height-4 validators
++	if height <= 4 {
++		rsValidators = cs.GetRoundStateAtHeight(0).state.Validators
++	} else {
++		rsValidators = cs.GetRoundStateAtHeight(height-4).state.Validators
++	}
++	return bytes.Equal(rsValidators.GetProposerAtHeight(height).Address, cs.privValidator.GetAddress())
+ }
+ 
+ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {

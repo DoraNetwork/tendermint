@@ -108,6 +108,8 @@ func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block
 
 	// update the app hash and save the state
 	s.AppHash = appHash
+	// update validator height
+	s.Validators.Height = block.Height
 	SaveState(blockExec.db, s, block.Height)
 
 	fail.Fail() // XXX

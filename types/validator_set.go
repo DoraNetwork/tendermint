@@ -25,6 +25,7 @@ type ValidatorSet struct {
 	// NOTE: persisted via reflect, must be exported.
 	Validators []*Validator `json:"validators"`
 	Proposer   *Validator   `json:"proposer"`
+	Height     int64        // The validators for the height
 
 	// cached (unexported)
 	totalVotingPower int64
@@ -77,6 +78,7 @@ func (valSet *ValidatorSet) Copy() *ValidatorSet {
 	return &ValidatorSet{
 		Validators:       validators,
 		Proposer:         valSet.Proposer,
+		Height:           valSet.Height,
 		totalVotingPower: valSet.totalVotingPower,
 	}
 }
@@ -126,6 +128,25 @@ func (valSet *ValidatorSet) TotalVotingPower() int64 {
 func (valSet *ValidatorSet) GetProposer() (proposer *Validator) {
 	if len(valSet.Validators) == 0 {
 		return nil
+	}
+	if valSet.Proposer == nil {
+		valSet.Proposer = valSet.findProposer()
+	}
+	return valSet.Proposer.Copy()
+}
+
+// check if its proposer for height
+func (valSet *ValidatorSet) GetProposerAtHeight(height int64) (proposer *Validator) {
+	if len(valSet.Validators) == 0 {
+		return nil
+	}
+	if height > (valSet.Height + 1) {
+		tmpValSet := valSet.Copy()
+		tmpValSet.IncrementAccum(int(height - (valSet.Height + 1)))
+		if tmpValSet.Proposer == nil {
+			tmpValSet.Proposer = tmpValSet.findProposer()
+		}
+		return tmpValSet.Proposer.Copy()
 	}
 	if valSet.Proposer == nil {
 		valSet.Proposer = valSet.findProposer()

@@ -233,6 +233,7 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 	defer cs.mtx.Unlock()
 	if _, ok := cs.roundStates[height]; ok {
 		cs.roundStates[height].state = cs.state.Copy()
+		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
 	}
 }
 
@@ -267,15 +268,12 @@ func (cs *ConsensusState) GetRoundStateAtHeight(height int64) *RoundStateWrapper
 
 func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper {
 	if _, ok := cs.roundStates[height]; !ok {
-		validators := cs.state.Validators
 		rsWrapper := RoundStateWrapper {
 			RoundState: cstypes.RoundState {
 				Height: height,
 				Round: 0,
 				Step: cstypes.RoundStepNewHeight,
 				StartTime: cs.config.Commit(time.Now()),
-				Validators: validators,
-				Votes: cstypes.NewHeightVoteSet(cs.state.ChainID, height, validators),
 				CommitRound: -1,
 			},
 			timeoutTicker: NewTimeoutTicker(),
@@ -286,6 +284,11 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 		} else {
 			rsWrapper.state = cs.state.Copy()
 		}
+		rsWrapper.Validators = rsWrapper.state.Validators
+		if height > 0 {
+			rsWrapper.Votes = cstypes.NewHeightVoteSet(cs.state.ChainID, height, rsWrapper.Validators)
+		}
+
 		rsWrapper.timeoutTicker.SetLogger(log.NewNopLogger())
 		rsWrapper.timeoutTicker.Start()
 
@@ -1111,8 +1114,15 @@ func (cs *ConsensusState) enterWaitToPropose(height int64, round int) {
 }
 
 func (cs *ConsensusState) isProposer(height int64) bool {
-	rs := cs.GetRoundStateAtHeight(height)
-	return bytes.Equal(rs.Validators.GetProposer().Address, cs.privValidator.GetAddress())}
+	rsValidators := cs.state.Validators
+	// Use height-4 validators
+	if height <= 4 {
+		rsValidators = cs.GetRoundStateAtHeight(0).state.Validators
+	} else {
+		rsValidators = cs.GetRoundStateAtHeight(height-4).state.Validators
+	}
+	return bytes.Equal(rsValidators.GetProposerAtHeight(height).Address, cs.privValidator.GetAddress())
+}
 
 func (cs *ConsensusState) CheckIsProposer(height int64) bool {
 	return cs.isProposer(height)
@@ -1842,8 +1852,12 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 		return ErrInvalidProposalPOLRound
 	}
 
+	rsB4Validators := rs.Validators
+	if proposal.Height > 4 {
+		rsB4Validators = cs.GetRoundStateAtHeight(proposal.Height - 4).Validators
+	}
 	// Verify signature
-	if !rs.Validators.GetProposer().PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
+	if !rsB4Validators.GetProposerAtHeight(proposal.Height).PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
 		return ErrInvalidProposalSignature
 	}
 
