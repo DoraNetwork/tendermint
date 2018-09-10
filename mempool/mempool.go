@@ -55,6 +55,8 @@ const cacheSize = 100000
 var removeCacheTx = false
 var usePtxHash = true
 
+type TxsMap map[string]struct{}
+
 // Mempool is an ordered in-memory pool for transactions before they are proposed in a consensus
 // round. Transaction validity is checked using the CheckTx abci message before the transaction is
 // added to the pool. The Mempool uses a concurrent list structure for storing transactions that
@@ -89,7 +91,10 @@ type Mempool struct {
 	logger log.Logger
 
 	// Keep track of uncommitted transactions
-	unCommittedTxs       map[int64]([]*mempoolTx)
+	uncommittedTxs       map[int64]([]*mempoolTx)
+
+	// Keep track of all transactions in pending blocks
+	pendingBlockTxs      map[int64]TxsMap
 }
 
 // NewMempool returns a new Mempool with the given configuration and connection to an application.
@@ -110,7 +115,8 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		recheckEnd:    nil,
 		logger:        log.NewNopLogger(),
 		cache:         newTxCache(cacheSize),
-		unCommittedTxs: make(map[int64]([]*mempoolTx)),
+		uncommittedTxs: make(map[int64]([]*mempoolTx)),
+		pendingBlockTxs: make(map[int64]TxsMap),
 	}
 	mempool.initWAL()
 	mempool.fetchingTx = make([][]byte, 0)
@@ -395,13 +401,17 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 			if (removeCacheTx) {
 				mem.cache.Remove(tx)
 			}
-			mem.txs.PushBack(memTx)
-			if (usePtxHash) {
-				mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
-				// fmt.Println("Mempool add tx hash", types.BytesToHash(r.CheckTx.Data))
+
+			if height := mem.isInPendingBlock(tx); height > 0 {
+				mem.uncommittedTxs[height] = append(mem.uncommittedTxs[height], memTx)
+			} else {
+				mem.txs.PushBack(memTx)
+				if (usePtxHash) {
+					mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
+				}
+				mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
+				//mem.notifyTxsAvailable()
 			}
-			mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
-			//mem.notifyTxsAvailable()
 		} else {
 			// ignore bad transaction
 			mem.logger.Info("Rejected bad transaction", "tx", tx, "res", r)
@@ -465,6 +475,16 @@ func (mem *Mempool) resCbRecheck(req *abci.Request, res *abci.Response) {
 	default:
 		// ignore other messages
 	}
+}
+
+func (mem *Mempool) isInPendingBlock(tx types.Tx) int64 {
+	for height, txs := range mem.pendingBlockTxs {
+		if _, ok := txs[string(tx)]; ok {
+			return height
+		}
+	}
+
+	return 0
 }
 
 // TxsAvailable returns a channel which fires once for every height,
@@ -548,8 +568,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	}
 
 	// Check whether txs have been moved into uncommited txs map
-	if _, ok := mem.unCommittedTxs[height]; ok {
-		delete(mem.unCommittedTxs, height)
+	if _, ok := mem.uncommittedTxs[height]; ok {
+		delete(mem.uncommittedTxs, height)
+		delete(mem.pendingBlockTxs, height)
 		return nil
 	}
 
@@ -584,6 +605,8 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 			}
 		}
 	}
+
+	mem.pendingBlockTxs[height] = txsMap
 
 	// Set height
 	mem.height = height
@@ -639,7 +662,7 @@ func (mem *Mempool) filterTxs(height int64, blockTxsMap map[string]struct{}) []t
 
 	// save into uncommitted txs map
 	if len(removedTxs) > 0 {
-		mem.unCommittedTxs[height] = removedTxs
+		mem.uncommittedTxs[height] = removedTxs
 	}
 
 	mem.logger.Info("After update mempool, tx size", mem.txs.Len())
@@ -666,7 +689,7 @@ func (mem *Mempool) recheckTxs(goodTxs []types.Tx) {
 // Restore txs back to mempool when rolling back pipeline
 // NOTE: unsafe; Lock/Unlock must be managed by caller
 func (mem *Mempool) Restore(height int64) {
-	if txs, ok := mem.unCommittedTxs[height]; ok {
+	if txs, ok := mem.uncommittedTxs[height]; ok {
 		size := len(txs)
 		for i := 0; i < size; i++ {
 			mem.txs.PushBack(txs[i])
