@@ -11,8 +11,11 @@ import (
 	"github.com/tendermint/tendermint/types"
 	dbm "github.com/tendermint/tmlibs/db"
 	"github.com/tendermint/tmlibs/log"
+	cmn "github.com/tendermint/tmlibs/common"
+	emtConfig "github.com/dora/ultron/node/config"
 )
 
+var deliverPtxHash = false
 //-----------------------------------------------------------------------------
 // BlockExecutor handles block execution and state updates.
 // It exposes ApplyBlock(), which validates & executes the block, updates state w/ ABCI responses,
@@ -40,6 +43,14 @@ type BlockExecutor struct {
 // Call SetEventBus to provide one.
 func NewBlockExecutor(db dbm.DB, logger log.Logger, proxyApp proxy.AppConnConsensus,
 	mempool types.Mempool, evpool types.EvidencePool) *BlockExecutor {
+	testConfig, _ := emtConfig.ParseConfig()
+	if testConfig != nil && testConfig.TestConfig.UsePtxHash {
+		if testConfig.TestConfig.BuildFullBlock {
+			deliverPtxHash = true
+		} else {
+			logger.Error("Cannot fire tx when build full block false")
+		}
+	}
 	return &BlockExecutor{
 		db:       db,
 		proxyApp: proxyApp,
@@ -390,15 +401,31 @@ func updateState(s State, blockID types.BlockID, header *types.Header,
 // NOTE: if Tendermint crashes before commit, some or all of these events may be published again.
 func fireEvents(logger log.Logger, eventBus types.BlockEventPublisher, block *types.Block, abciResponses *ABCIResponses) {
 	// NOTE: do we still need this buffer ?
-	// TODO: would change to ptx, where to use the publish event tx
 	txEventBuffer := types.NewTxEventBuffer(eventBus, int(block.NumTxs))
-	for i, tx := range block.Data.Txs {
-		txEventBuffer.PublishEventTx(types.EventDataTx{types.TxResult{
-			Height: block.Height,
-			Index:  uint32(i),
-			Tx:     tx,
-			Result: *(abciResponses.DeliverTx[i]),
-		}})
+	if !deliverPtxHash {
+		for i, tx := range block.Data.Txs {
+			txEventBuffer.PublishEventTx(types.EventDataTx{types.TxResult{
+				Height: block.Height,
+				Index:  uint32(i),
+				Tx:     tx,
+				Result: *(abciResponses.DeliverTx[i]),
+			}})
+		}
+	} else {
+		for i, txs := range block.Data.Txs {
+			ptx, _, _ := types.DecodePtx(txs)
+			if (ptx == nil) {
+				cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
+			}
+			for _, tx := range ptx.Data.Txs {
+				txEventBuffer.PublishEventTx(types.EventDataTx{types.TxResult{
+					Height: block.Height,
+					Index:  uint32(i),
+					Tx:     tx,
+					Result: *(abciResponses.DeliverTx[i]),
+				}})
+			}
+		}
 	}
 
 	eventBus.PublishEventNewBlock(types.EventDataNewBlock{block})
