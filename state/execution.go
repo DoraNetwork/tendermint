@@ -50,6 +50,11 @@ func NewBlockExecutor(db dbm.DB, logger log.Logger, proxyApp proxy.AppConnConsen
 	}
 }
 
+// GetDb return the db using
+func (blockExec *BlockExecutor) GetDb() (dbm.DB) {
+	return blockExec.db
+}
+
 // SetEventBus - sets the event bus for publishing block related events.
 // If not called, it defaults to types.NopEventBus.
 func (blockExec *BlockExecutor) SetEventBus(eventBus types.BlockEventPublisher) {
@@ -61,9 +66,7 @@ func (blockExec *BlockExecutor) SetEventBus(eventBus types.BlockEventPublisher) 
 // Validation does not mutate state, but does require historical information from the stateDB,
 // ie. to verify evidence from a validator at an old height.
 func (blockExec *BlockExecutor) ValidateBlock(s State, block *types.Block) error {
-	// TODO: add correct block validation logic
-	// return validateBlock(blockExec.db, s, block)
-	return nil
+	return validateBlock(blockExec.db, s, block)
 }
 
 // ApplyBlock validates the block against the state, executes it against the app,
@@ -73,9 +76,9 @@ func (blockExec *BlockExecutor) ValidateBlock(s State, block *types.Block) error
 // It takes a blockID to avoid recomputing the parts hash.
 func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block *types.Block) (State, error) {
 
-	if err := blockExec.ValidateBlock(s, block); err != nil {
-		return s, ErrInvalidBlock(err)
-	}
+	// if err := blockExec.ValidateBlock(s, block); err != nil {
+	// 	return s, ErrInvalidBlock(err)
+	// }
 
 	abciResponses, err := execBlockOnProxyApp(blockExec.logger, blockExec.proxyApp, block)
 	if err != nil {
@@ -105,7 +108,7 @@ func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block
 
 	// update the app hash and save the state
 	s.AppHash = appHash
-	SaveState(blockExec.db, s)
+	SaveState(blockExec.db, s, block.Height)
 
 	fail.Fail() // XXX
 

@@ -13,6 +13,10 @@ import (
 
 //------------------------------------------------------------------------
 
+func calcStateKey(height int64) []byte {
+	return []byte(cmn.Fmt("statekey:%v", height))
+}
+
 func calcValidatorsKey(height int64) []byte {
 	return []byte(cmn.Fmt("validatorsKey:%v", height))
 }
@@ -36,7 +40,7 @@ func LoadStateFromDBOrGenesisFile(stateDB dbm.DB, genesisFilePath string) (State
 		if err != nil {
 			return state, err
 		}
-		SaveState(stateDB, state)
+		SaveState(stateDB, state, 0)
 	}
 
 	return state, nil
@@ -53,7 +57,7 @@ func LoadStateFromDBOrGenesisDoc(stateDB dbm.DB, genesisDoc *types.GenesisDoc) (
 		if err != nil {
 			return state, err
 		}
-		SaveState(stateDB, state)
+		SaveState(stateDB, state, 0)
 	}
 
 	return state, nil
@@ -82,9 +86,16 @@ func loadState(db dbm.DB, key []byte) (state State) {
 	return state
 }
 
+func LoadStateAtHeight(db dbm.DB, height int64) (state State) {
+	return loadState(db, calcStateKey(height))
+}
+
 // SaveState persists the State, the ValidatorsInfo, and the ConsensusParamsInfo to the database.
-func SaveState(db dbm.DB, s State) {
+func SaveState(db dbm.DB, s State, height int64) {
 	saveState(db, s, stateKey)
+	if (height > 0) {
+	    db.SetSync(calcStateKey(height), s.Bytes())
+	}
 }
 
 func saveState(db dbm.DB, s State, key []byte) {

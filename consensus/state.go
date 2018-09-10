@@ -50,6 +50,7 @@ var (
 	compactBlock = true
 	buildFullBlock = false	// use compact block build full block with raw tx
 	broadcastPtxHash = true
+	loadStateFromStore = false
 )
 
 // msgs from the reactor which may update the state
@@ -137,6 +138,7 @@ type ConsensusState struct {
 
 type RoundStateWrapper struct {
 	cstypes.RoundState
+	state sm.State
 	timeoutTicker    TimeoutTicker
 	timeout          map[cstypes.RoundStepType]bool
 }
@@ -226,6 +228,15 @@ func (cs *ConsensusState) getRoundState() *cstypes.RoundState {
 }
 
 // Should be invoked within mutex protection
+func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+	if _, ok := cs.roundStates[height]; ok {
+		cs.roundStates[height].state = cs.state.Copy()
+	}
+}
+
+// Should be invoked within mutex protection
 func (cs *ConsensusState) GetRoundStateAtHeight(height int64) *RoundStateWrapper {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
@@ -247,6 +258,11 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 			},
 			timeoutTicker: NewTimeoutTicker(),
 			timeout: make(map[cstypes.RoundStepType]bool),
+		}
+		if (loadStateFromStore && (height > 0)) {
+			rsWrapper.state = sm.LoadStateAtHeight(cs.blockExec.GetDb(), height)
+		} else {
+			rsWrapper.state = cs.state.Copy()
 		}
 		rsWrapper.timeoutTicker.SetLogger(log.NewNopLogger())
 		rsWrapper.timeoutTicker.Start()
@@ -309,6 +325,20 @@ func (cs *ConsensusState) LoadCommit(height int64) *types.Commit {
 	return cs.blockStore.LoadBlockCommit(height)
 }
 
+// LoadBlockCommit loads the commit for a given height.
+func (cs *ConsensusState) LoadBlockCommit(height int64) *types.Commit {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+	return cs.blockStore.LoadBlockCommit(height)
+}
+
+// LoadSeenCommit loads the commit for a given height.
+func (cs *ConsensusState) LoadSeenCommit(height int64) *types.Commit {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+	return cs.blockStore.LoadSeenCommit(height)
+}
+
 // OnStart implements cmn.Service.
 // It loads the latest state via the WAL, and starts the timeout and receive routines.
 func (cs *ConsensusState) OnStart() error {
@@ -354,9 +384,17 @@ func (cs *ConsensusState) OnStart() error {
 	// schedule the first 4 rounds!
 	// use GetRoundState so we don't race the receiveRoutine for access
 	initialHeight = cs.state.LastBlockHeight + 1
+	if (cs.state.LastBlockHeight > 4) {
+		loadStateFromStore = true
+		for i := 0; i <= 3; i++ {
+			cs.GetRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
+		}
+		loadStateFromStore = false
+	}
 	for i := 1; i <= 4; i++ {
 		cs.scheduleRound0(cs.GetRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
 	}
+
 
 	return nil
 }
@@ -1139,7 +1177,8 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 			commit = lastCommit.MakeCommit()
 		} else {
 			// Load commit from blockstore if it's not available
-			commit = cs.LoadCommit(height - 4)
+			// commit = cs.LoadCommit(height - 4)
+			commit = cs.LoadSeenCommit(height - 4)
 			if commit == nil {
 				// This shouldn't happen.
 				cs.Logger.Error("enterPropose: Cannot propose anything: No commit for the previous block.")
@@ -1149,10 +1188,13 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 	}
 
 	// Mempool validated transactions
-	// First generate CMPCTProposalBlock
+	rsB4 := cs.state
+	if (height > 4) {
+		rsB4 = cs.GetRoundStateAtHeight(height - 4).state
+	}
 	if (compactBlock) {
 		ptxsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(cs.privValidator, rs.Height, ptxsHash, commit)
+		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, ptxsHash, commit)
 		evidence := cs.evpool.PendingEvidence()
 		cmpctBlock.AddEvidence(evidence)
 		block = cmpctBlock
@@ -1160,7 +1202,7 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 		return block, blockParts, cmpctBlock, cmpctBlockParts
 	} else {
 		ptxs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		block, blockParts := cs.state.MakeBlockForProposer(cs.privValidator, rs.Height, ptxs, commit)
+		block, blockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, ptxs, commit)
 		evidence := cs.evpool.PendingEvidence()
 		block.AddEvidence(evidence)
 		cmpctBlock = block
@@ -1277,8 +1319,12 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 		return
 	}
 
+	rsB4 := cs.state
+	if (height > 4) {
+		rsB4 = cs.GetRoundStateAtHeight(height-4).state
+	}
 	// Validate proposal block
-	err := cs.blockExec.ValidateBlock(cs.state, rs.ProposalBlock)
+	err := cs.blockExec.ValidateBlock(rsB4, rs.ProposalBlock)
 	if err != nil {
 		// ProposalBlock is invalid, prevote nil.
 		logger.Error("enterPrevote: ProposalBlock is invalid", "err", err)
@@ -1415,8 +1461,12 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	// If +2/3 prevoted for proposal block, stage and precommit it
 	if rs.ProposalBlock.HashesTo(blockID.Hash) {
 		cs.Logger.Info("enterPrecommit: +2/3 prevoted proposal block. Locking", "hash", blockID.Hash)
+		rsB4 := cs.state
+		if (height > 4) {
+			rsB4 = cs.GetRoundStateAtHeight(height-4).state
+		}
 		// Validate the block.
-		if err := cs.blockExec.ValidateBlock(cs.state, rs.ProposalBlock); err != nil {
+		if err := cs.blockExec.ValidateBlock(rsB4, rs.ProposalBlock); err != nil {
 			cmn.PanicConsensus(cmn.Fmt("enterPrecommit: +2/3 prevoted for an invalid block: %v", err))
 		}
 		rs.LockedRound = round
@@ -1639,7 +1689,11 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	if !block.HashesTo(blockID.Hash) {
 		cmn.PanicSanity(cmn.Fmt("Cannot finalizeCommit, ProposalBlock does not hash to commit hash"))
 	}
-	if err := cs.blockExec.ValidateBlock(cs.state, block); err != nil {
+	rsB4 := cs.state
+	if (height > 4) {
+		rsB4 = cs.GetRoundStateAtHeight(height-4).state
+	}
+	if err := cs.blockExec.ValidateBlock(rsB4, block); err != nil {
 		cmn.PanicConsensus(cmn.Fmt("+2/3 committed an invalid block: %v", err))
 	}
 
@@ -1703,6 +1757,8 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	// clear useless round states
 	cs.truncateRoundStates()
+
+	cs.updateRoundStateAtHeight(height)
 
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.

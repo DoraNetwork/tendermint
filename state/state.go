@@ -105,18 +105,19 @@ func (s State) GetValidators() (last *types.ValidatorSet, current *types.Validat
 // Create a block from the latest state
 
 // MakeBlock builds a block with the given txs and commit from the current state.
-func (s State) MakeBlockForProposer(proposer types.PrivValidator, height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
+func (s State) MakeBlockForProposer(csState State, proposer types.PrivValidator, height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
 	// build base block
 	block := types.MakeBlock(height, txs, commit)
 
 	// fill header with state data
-	block.ChainID = s.ChainID
-	block.TotalTxs = s.LastBlockTotalTx + block.NumTxs
-	block.LastBlockID = s.LastBlockID
-	block.ValidatorsHash = s.Validators.Hash()
-	block.AppHash = s.AppHash
-	block.ConsensusHash = s.ConsensusParams.Hash()
-	block.LastResultsHash = s.LastResultsHash
+	block.ChainID = csState.ChainID
+	block.TotalTxs = csState.LastBlockTotalTx + block.NumTxs
+	// first 4 blocks dont have these infos
+	block.LastBlockID = csState.LastBlockID
+	block.ValidatorsHash = csState.Validators.Hash()
+	block.AppHash = csState.AppHash
+	block.ConsensusHash = csState.ConsensusParams.Hash()
+	block.LastResultsHash = csState.LastResultsHash
 	if proposer != nil {
 		if height == 1 {
 			block.Random = types.VrfRandom {
@@ -126,7 +127,7 @@ func (s State) MakeBlockForProposer(proposer types.PrivValidator, height int64, 
 		} else {
 			privKey := proposer.GetPrivKey().Unwrap()
 			block.Random, _ = types.GenerateRandom(
-				privKey.RawBytes(), s.LastResultsHash, s.LastBlockRandom.Seed)
+				privKey.RawBytes(), csState.LastResultsHash, csState.LastBlockRandom.Seed)
 		}
 	}
 
@@ -134,7 +135,7 @@ func (s State) MakeBlockForProposer(proposer types.PrivValidator, height int64, 
 }
 
 func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
-	return s.MakeBlockForProposer(nil, height, txs, commit)
+	return s.MakeBlockForProposer(s, nil, height, txs, commit)
 }
 
 //------------------------------------------------------------------------

@@ -18,12 +18,16 @@ func validateBlock(stateDB dbm.DB, s State, b *types.Block) error {
 		return err
 	}
 
+	if (b.Height <= 4) {
+		return nil
+	}
 	// validate basic info
 	if b.ChainID != s.ChainID {
 		return fmt.Errorf("Wrong Block.Header.ChainID. Expected %v, got %v", s.ChainID, b.ChainID)
 	}
-	if b.Height != s.LastBlockHeight+1 {
-		return fmt.Errorf("Wrong Block.Header.Height. Expected %v, got %v", s.LastBlockHeight+1, b.Height)
+
+	if b.Height != s.LastBlockHeight+4 {
+		return fmt.Errorf("Wrong Block.Header.Height. Expected %v, got %v", s.LastBlockHeight+4, b.Height)
 	}
 	/*	TODO: Determine bounds for Time
 		See blockchain/reactor "stopSyncingDurationMinutes"
