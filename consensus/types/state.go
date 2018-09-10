@@ -52,6 +52,8 @@ func (rs RoundStepType) String() string {
 		return "RoundStepPrecommit"
 	case RoundStepPrecommitWait:
 		return "RoundStepPrecommitWait"
+	case RoundStepWaitToCommit:
+		return "RoundStepWaitToCommit"
 	case RoundStepCommit:
 		return "RoundStepCommit"
 	default:

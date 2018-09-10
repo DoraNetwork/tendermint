@@ -220,14 +220,14 @@ func (cs *ConsensusState) GetRoundState() *cstypes.RoundState {
 }
 
 func (cs *ConsensusState) getRoundState() *cstypes.RoundState {
-	rs := cs.GetRoundStateAtHeight(cs.state.LastBlockHeight).RoundState //copy
+	rs := cs.getRoundStateAtHeight(cs.state.LastBlockHeight).RoundState //copy
 	return &rs
 }
 
 // Should be invoked within mutex protection
 func (cs *ConsensusState) GetRoundStateAtHeight(height int64) *RoundStateWrapper {
-	// cs.mtx.Lock()
-	// defer cs.mtx.Unlock()
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
 	return cs.getRoundStateAtHeight(height)
 }
 
@@ -265,14 +265,14 @@ func (cs *ConsensusState) GetVotesAtHeight(height int64) *cstypes.HeightVoteSet 
 func (cs *ConsensusState) GetValidatorSize(height int64) int {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	return rs.Validators.Size()
 }
 
 func (cs *ConsensusState) GetLastCommitSize(height int64) int {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	return rs.LastCommit.Size()
 }
 
@@ -695,8 +695,8 @@ func (cs *ConsensusState) startHandleRoutine(index int) {
 
 // state transitions on complete-proposal, 2/3-any, 2/3-one
 func (cs *ConsensusState) handleMsg(mi msgInfo) {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
+	// cs.mtx.Lock()
+	// defer cs.mtx.Unlock()
 
 	var err error
 	msg, peerKey := mi.Msg, mi.PeerKey
@@ -738,8 +738,8 @@ func (cs *ConsensusState) handleMsg(mi msgInfo) {
 func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 	cs.Logger.Debug("Received tock", "timeout", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
 
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
+	// cs.mtx.Lock()
+	// defer cs.mtx.Unlock()
 
 	// timeouts must be for current height, round, step
 	rs := cs.GetRoundStateAtHeight(ti.Height)
@@ -973,8 +973,10 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 	types.RcenterPropose()
 	cs.Logger.Info(cmn.Fmt("enterPropose(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
+	canMoveForward := cs.canEnterPropose(height)
+
 	defer func() {
-		if cs.canEnterPropose(height) {
+		if canMoveForward {
 			// Done enterPropose:
 			cs.updateRoundStep(height, round, cstypes.RoundStepPropose)
 			cs.newStep(height)
@@ -1007,7 +1009,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 	} else {
 		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
 		cs.Logger.Debug("This node is a validator")
-		if cs.canEnterPropose(height) {
+		if canMoveForward {
 			// If we don't get the proposal and all block parts quick enough, enterPrevote
 			cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
 			// create and broadcast proposal
@@ -1184,15 +1186,19 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
-	types.RcenterPrevote()
 
 	if rs.Step < cstypes.RoundStepPropose {
 		cs.Logger.Debug("Not ready to enter prevote")
 		return
 	}
 
+	types.RcenterPrevote()
+	cs.Logger.Info(cmn.Fmt("enterPrevote(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
+
+	canMoveForward := cs.canEnterPrevote(height)
+
 	defer func() {
-		if cs.canEnterPrevote(height) {
+		if canMoveForward {
 			// Done enterPrevote:
 			cs.updateRoundStep(height, round, cstypes.RoundStepPrevote)
 			cs.newStep(height)
@@ -1209,10 +1215,8 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 		// TODO: catchup event?
 	}
 
-	cs.Logger.Info(cmn.Fmt("enterPrevote(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
-
 	// Sign and broadcast vote as necessary
-	if cs.canEnterPrevote(height) {
+	if canMoveForward {
 		cs.doPrevote(height, round)
 	} else {
 		// enter wait-to-prevote step, woken up when previous height enters precommit
@@ -1313,21 +1317,34 @@ func (cs *ConsensusState) enterPrevoteWait(height int64, round int) {
 // else, precommit nil otherwise.
 func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs := cs.GetRoundStateAtHeight(height)
-	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit <= rs.Step) {
+	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit == rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
-	types.RcenterPrecommit()
 
+	// Must enter prevote before entering precommit
 	if rs.Step < cstypes.RoundStepPrevote {
 		cs.Logger.Debug("Not ready to enter precommit")
 		return
 	}
 
+	// Since cs.state.LastBlockHeight is updated before
+	// sending state transition message, while we've removed
+	// mutex for parallel execution, it is possible that
+	// next height has already entered WaitToCommit state
+	if rs.Step > cstypes.RoundStepPrecommit {
+		cs.Logger.Debug("Ahead of precommit, enter commit")
+		cs.enterCommit(height, round)
+		return
+	}
+
+	types.RcenterPrecommit()
 	cs.Logger.Info(cmn.Fmt("enterPrecommit(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
+	canMoveForward := cs.canEnterPrecommit(height)
+
 	defer func() {
-		if cs.canEnterPrecommit(height) {
+		if canMoveForward {
 			// Done enterPrecommit:
 			cs.updateRoundStep(height, round, cstypes.RoundStepPrecommit)
 			cs.newStep(height)
@@ -1336,7 +1353,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		}
 	}()
 
-	if !cs.canEnterPrecommit(height) {
+	if !canMoveForward {
 		cs.enterWaitToPrecommit(height, round)
 		return
 	}
@@ -1488,8 +1505,10 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 	types.RcenterCommit()
 	cs.Logger.Info(cmn.Fmt("enterCommit(%v/%v). Current: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
 
+	canMoveForward := cs.canEnterCommit(height)
+
 	defer func() {
-		if cs.canEnterCommit(height) {
+		if canMoveForward {
 			// Done enterCommit:
 			// keep cs.Round the same, commitRound points to the right Precommits set.
 			cs.updateRoundStep(height, rs.Round, cstypes.RoundStepCommit)
@@ -1505,7 +1524,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 		}
 	}()
 
-	if !cs.canEnterCommit(height) {
+	if !canMoveForward {
 		cs.enterWaitToCommit(height, commitRound)
 		return
 	}
@@ -1693,6 +1712,9 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 }
 
 func (cs *ConsensusState) truncateRoundStates() {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+
 	currentHeight := cs.state.LastBlockHeight
 	maxLen := int64(100)
 
