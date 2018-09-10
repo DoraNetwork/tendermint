@@ -1959,7 +1959,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// if do not need verify(is proposer) or all tx have in local,
 		// Assign ProposalCMPCTBlock to ProposalBlock direclty
 		if (!verify || !missTxBool) {
-			if (broadcastPtxHash && buildFullBlock) {
+			if (broadcastPtxHash && buildFullBlock && len(rs.ProposalCMPCTBlock.Txs) != 0) {
 				cs.buildFullBlockFromCMPCTBlock(height)
 			} else {
 				rs.ProposalBlock = rs.ProposalCMPCTBlock
