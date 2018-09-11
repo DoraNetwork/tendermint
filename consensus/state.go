@@ -874,7 +874,9 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		rs.ProposalBlock = block
 		rs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
 		cs.Logger.Info("Build proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
-		if rs.Step == cstypes.RoundStepPropose && cs.isProposalComplete(height) {
+		cs.updateMemPool(height, rs)
+		if cs.isProposalComplete(height) &&
+			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
 			cs.enterPrevote(cs.cmpctBlockHeight, rs.Round)
 		} else if rs.Step == cstypes.RoundStepCommit {
@@ -897,7 +899,8 @@ func (cs *ConsensusState) handleBuildProposalBlock(height int64, txHash []byte) 
 			rs.ProposalBlock = rs.ProposalCMPCTBlock
 			rs.ProposalBlockParts = rs.ProposalCMPCTBlockParts
 			cs.Logger.Info("All pending tx avaiable, assign cmpct block to ProposalBlock", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
-			if rs.Step == cstypes.RoundStepPropose && cs.isProposalComplete(height) {
+			if cs.isProposalComplete(height) &&
+				(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 				// Move onto the next step
 				cs.enterPrevote(cs.cmpctBlockHeight, rs.Round)
 			} else if rs.Step == cstypes.RoundStepCommit {
@@ -1887,6 +1890,13 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 	return nil
 }
 
+// Move txs in this block into uncommited txs map
+func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
+	cs.mempool.Lock()
+	cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
+	cs.mempool.Unlock()
+}
+
 // NOTE: block is not necessarily valid.
 // Asynchronously triggers either enterPrevote (before we timeout of propose) or tryFinalizeCommit, once we have the full block.
 func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
@@ -1914,10 +1924,7 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		// NOTE: it's possible to receive complete proposal blocks for future rounds without having the proposal
 		cs.Logger.Info("Received complete proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 
-		// Move txs in this block into uncommited txs map
-		cs.mempool.Lock()
-		cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
-		cs.mempool.Unlock()
+		cs.updateMemPool(height, rs)
 
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
@@ -1985,6 +1992,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				rs.ProposalBlock = rs.ProposalCMPCTBlock
 				rs.ProposalBlockParts = rs.ProposalCMPCTBlockParts
 				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
+				cs.updateMemPool(height, rs)
 				if cs.isProposalComplete(height) &&
 					(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 					// Move onto the next step
