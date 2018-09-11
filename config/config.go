@@ -322,6 +322,9 @@ type ConsensusConfig struct {
 	// Reactor sleep duration parameters are in ms
 	PeerGossipSleepDuration     int `mapstructure:"peer_gossip_sleep_duration"`
 	PeerQueryMaj23SleepDuration int `mapstructure:"peer_query_maj23_sleep_duration"`
+
+	// Pipeline nonstop mode
+	PipelineNonstopMode       bool  `mapstructure:"pipeline_nonstop_mode"`
 }
 
 // WaitForTxs returns true if the consensus should wait for transactions before entering the propose step
@@ -364,6 +367,11 @@ func (cfg *ConsensusConfig) PeerQueryMaj23Sleep() time.Duration {
 	return time.Duration(cfg.PeerQueryMaj23SleepDuration) * time.Millisecond
 }
 
+// PipelineNonstop returns true if pipeline non-stop mode is enabled
+func (cfg *ConsensusConfig) PipelineNonstop() bool {
+	return cfg.PipelineNonstopMode
+}
+
 // DefaultConsensusConfig returns a default configuration for the consensus service
 func DefaultConsensusConfig() *ConsensusConfig {
 	return &ConsensusConfig{
@@ -383,6 +391,7 @@ func DefaultConsensusConfig() *ConsensusConfig {
 		CreateEmptyBlocksInterval:   0,
 		PeerGossipSleepDuration:     100,
 		PeerQueryMaj23SleepDuration: 2000,
+		PipelineNonstopMode:         false,
 	}
 }
 

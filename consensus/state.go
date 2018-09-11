@@ -808,12 +808,23 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 
 	// timeouts must be for current height, round, step
 	rs := cs.GetRoundStateAtHeight(ti.Height)
-	if ti.Height != rs.Height || ti.Round < rs.Round || (ti.Round == rs.Round && ti.Step < rs.Step) {
-		cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round, "step", rs.Step)
+	if ti.Height != rs.Height || ti.Round < rs.Round {
+		cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round)
 		return
 	}
 
 	cs.setStepTimeout(ti.Height, ti.Step)
+
+	if ti.Step < rs.Step {
+		// enter propose directly if already in WaitToPropose state
+		if ti.Step == cstypes.RoundStepNewHeight && rs.Step == cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(ti.Height, 0)
+		} else {
+			cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round, "step", rs.Step)
+		}
+
+		return
+	}
 
 	// the timeout will now cause a state transition
 	switch ti.Step {
@@ -908,6 +919,7 @@ func (cs* ConsensusState) notifyStateTransition(height int64, typ cstypes.RoundS
 
 func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundStepType) error {
 	rs := cs.GetRoundStateAtHeight(height + 1)
+
 	switch typ {
 	case cstypes.RoundStepPrevote:
 		cs.enterPropose(rs.Height, rs.Round)
@@ -1102,6 +1114,14 @@ func (cs *ConsensusState) canEnterPropose(height int64) bool {
 	// Previous height's proposal not available, wait
 	if !preRs.IsProposalComplete() {
 		return false
+	}
+
+	// Reached new height timeout?
+	if !cs.config.PipelineNonstop() {
+		rs := cs.GetRoundStateAtHeight(height)
+		if !rs.timeout[cstypes.RoundStepNewHeight] {
+			return false
+		}
 	}
 
 	return true
