@@ -875,6 +875,7 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		rs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
 		cs.Logger.Info("Build proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 		cs.updateMemPool(height, rs)
+		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
@@ -1051,7 +1052,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 		cs.Logger.Debug(cmn.Fmt("enterPropose(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
-	types.RcenterPropose()
+	types.RcenterPropose(height)
 	cs.Logger.Info(cmn.Fmt("enterPropose(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
 	canMoveForward := cs.canEnterPropose(height)
@@ -1094,9 +1095,9 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 			// If we don't get the proposal and all block parts quick enough, enterPrevote
 			cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
 			// create and broadcast proposal
-			types.RcstartCreateBlock()
+			types.RcstartCreateBlock(height)
 			cs.decideProposal(height, round)
-			types.RcendCreateBlock()
+			types.RcendCreateBlock(height)
 		} else {
 			// enter wait-to-propose step, woken up when previous height entered prevote
 			cs.enterWaitToPropose(height, round)
@@ -1302,7 +1303,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 		return
 	}
 
-	types.RcenterPrevote()
+	types.RcenterPrevote(height)
 	cs.Logger.Info(cmn.Fmt("enterPrevote(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
 	canMoveForward := cs.canEnterPrevote(height)
@@ -1452,7 +1453,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		return
 	}
 
-	types.RcenterPrecommit()
+	types.RcenterPrecommit(height)
 	cs.Logger.Info(cmn.Fmt("enterPrecommit(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
 	canMoveForward := cs.canEnterPrecommit(height)
@@ -1620,7 +1621,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 		return
 	}
 
-	types.RcenterCommit()
+	types.RcenterCommit(height)
 	cs.Logger.Info(cmn.Fmt("enterCommit(%v/%v). Current: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
 
 	canMoveForward := cs.canEnterCommit(height)
@@ -1831,8 +1832,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// * cs.Step is now cstypes.RoundStepNewHeight
 	// * cs.StartTime is set to when we will start round0.
 
-	types.RcBlockHeight(block, blockParts)
-	types.RccommitOver()
+	types.RccommitOver(height)
 }
 
 func (cs *ConsensusState) truncateRoundStates() {
@@ -1918,14 +1918,14 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		// Added and completed!
 		var n int
 		var err error
-		types.RcreceiveBlock()
+		types.RcreceiveBlock(height)
 		rs.ProposalBlock = wire.ReadBinary(&types.Block{}, rs.ProposalBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		// NOTE: it's possible to receive complete proposal blocks for future rounds without having the proposal
 		cs.Logger.Info("Received complete proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 
 		cs.updateMemPool(height, rs)
-
+		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
@@ -1959,7 +1959,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		return added, err
 	}
 	if added && rs.ProposalCMPCTBlockParts.IsComplete() {
-		types.RcreceiveBlock()
+		types.RcreceiveBlock(height)
 		// Added and completed!
 		var n int
 		var err error
@@ -1968,6 +1968,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "hash", rs.ProposalCMPCTBlock.Hash())
 		cs.cmpctBlockHeight = height
+		types.RcCMPCTBlock(height, rs.ProposalCMPCTBlock, rs.ProposalCMPCTBlockParts)
 		// assign cmpctblock to block directly
 		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer
 		missTxBool := false
@@ -1993,6 +1994,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				rs.ProposalBlockParts = rs.ProposalCMPCTBlockParts
 				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 				cs.updateMemPool(height, rs)
+				types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 				if cs.isProposalComplete(height) &&
 					(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 					// Move onto the next step

@@ -3,41 +3,53 @@ package types
 import (
 	"fmt"
 	"time"
+	"sync"
 	wire "github.com/tendermint/go-wire"
 	emtConfig "github.com/dora/ultron/node/config"
 )
 
+type RecordTime struct {
+	enterProposeTime			int64
+	startCreateBlockTime		int64
+	endCreateBlockTime			int64
+	recevieBlockTime			int64
+	enterPrevoteTime			int64
+	receive23prevoteTime		int64
+	enterPrecommitTime			int64
+	receive23Precommit			int64
+	enterCommitTime				int64
+	commitOverTime				int64
+	startNewHeightTime			int64
+	blockHeight					int64
+	blockTxs					int64
+	blockPtxs					int64
+	blockSize					int
+	blockPartCount				int
+	cmpctBlockSize				int
+	cmpctBlockPartCount			int
+}
+
 var (
-	enterProposeTime = (int64)(0)
-	startCreateBlockTime = (int64)(0)
-	endCreateBlockTime = (int64)(0)
-	recevieBlockTime = (int64)(0)
-	enterPrevoteTime = (int64)(0)
-	receive23prevoteTime = (int64)(0)
-	enterPrecommitTime = (int64)(0)
-	receive23Precommit = (int64)(0)
-	enterCommitTime = (int64)(0)
-	commitOverTime = (int64)(0)
-	startNewHeightTime = (int64)(0)
-	blockHeight = (int64)(0)
-	blockTxs = (int64)(0)
-	blockPtxs = (int64)(0)
-	blockSize = (int)(0)
-	blockPartCount = (int)(0)
+	parellelPBFT = true
 	printConsensusLog = false
 	printSendRecvLog = false
 	ptxInBlock = false
+	mtx sync.Mutex
+	recordTime map[int64]*RecordTime
 )
 
 func RcInit() {
 	testConfig, _ := emtConfig.ParseConfig()
-	if (testConfig != nil) {
-		if (testConfig.TestConfig.PrintConsensusLog) {
+	if testConfig != nil {
+		if testConfig.TestConfig.PrintConsensusLog {
 			printConsensusLog = true
 		}
-		if (testConfig.TestConfig.PrintSendRecvLog) {
+		if testConfig.TestConfig.PrintSendRecvLog {
 			printSendRecvLog = true
 		}
+	}
+	if printConsensusLog {
+		recordTime = make(map[int64]*RecordTime)
 	}
 }
 
@@ -45,65 +57,124 @@ func RcPtxInBlock() {
 	ptxInBlock = true
 }
 
-func reset() {
-	enterProposeTime = (int64)(0)
-	startCreateBlockTime = (int64)(0)
-	endCreateBlockTime = (int64)(0)
-	recevieBlockTime = (int64)(0)
-	enterPrevoteTime = (int64)(0)
-	receive23prevoteTime = (int64)(0)
-	enterPrecommitTime = (int64)(0)
-	receive23Precommit = (int64)(0)
-	enterCommitTime = (int64)(0)
-	commitOverTime = (int64)(0)
-	blockTxs = (int64)(0)
-	blockPtxs = (int64)(0)
-	blockSize = (int)(0)
-	blockPartCount = (int)(0)
+func reset(rT *RecordTime) {
+	rT.enterProposeTime = (int64)(0)
+	rT.startCreateBlockTime = (int64)(0)
+	rT.endCreateBlockTime = (int64)(0)
+	rT.recevieBlockTime = (int64)(0)
+	rT.enterPrevoteTime = (int64)(0)
+	rT.receive23prevoteTime = (int64)(0)
+	rT.enterPrecommitTime = (int64)(0)
+	rT.receive23Precommit = (int64)(0)
+	rT.enterCommitTime = (int64)(0)
+	rT.commitOverTime = (int64)(0)
+	rT.blockTxs = (int64)(0)
+	rT.blockPtxs = (int64)(0)
+	rT.blockSize = (int)(0)
+	rT.blockPartCount = (int)(0)
 }
 
-func RcenterPropose() {
-	enterProposeTime = time.Now().UnixNano()
+func getRecordTimeAtHeight(height int64) *RecordTime{
+	mtx.Lock()
+	defer mtx.Unlock()
+	if _, ok := recordTime[height]; !ok {
+		rT := &RecordTime {}
+		// reset(rT)
+		recordTime[height] = rT
+	}
+	return recordTime[height]
+}
+
+func removeRecordTime(height int64) {
+	mtx.Lock()
+	defer mtx.Unlock()
+	if _, ok := recordTime[height]; ok {
+		delete(recordTime, height)
+	}
+}
+
+func RcenterPropose(height int64) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.enterProposeTime = time.Now().UnixNano()
 	// fmt.Println("*****Block height", blockHeight, "propose time", enterProposeTime)
 }
 
-func RcstartCreateBlock() {
-    startCreateBlockTime = time.Now().UnixNano()
+func RcstartCreateBlock(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.startCreateBlockTime = time.Now().UnixNano()
 }
 
-func RcendCreateBlock() {
-    endCreateBlockTime = time.Now().UnixNano()
+func RcendCreateBlock(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.endCreateBlockTime = time.Now().UnixNano()
 }
 
-func RcreceiveBlock() {
-    recevieBlockTime = time.Now().UnixNano()
+func RcreceiveBlock(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.recevieBlockTime = time.Now().UnixNano()
 }
 
-func RcenterPrevote() {
-	enterPrevoteTime = time.Now().UnixNano()
+func RcenterPrevote(height int64) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.enterPrevoteTime = time.Now().UnixNano()
 	// fmt.Println("*****Block height", blockHeight, "prevote time", enterPrevoteTime)
 }
 
-func Rcreceive23Prevote() {
-    receive23prevoteTime = time.Now().UnixNano()
+func Rcreceive23Prevote(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.receive23prevoteTime = time.Now().UnixNano()
 }
 
-func RcenterPrecommit() {
-	enterPrecommitTime = time.Now().UnixNano()
+func RcenterPrecommit(height int64) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.enterPrecommitTime = time.Now().UnixNano()
 	// fmt.Println("*****Block height", blockHeight, "precommit time", enterPrecommitTime)
 }
 
-func Rcreceive23Precommit() {
-    receive23Precommit = time.Now().UnixNano()
+func Rcreceive23Precommit(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.receive23Precommit = time.Now().UnixNano()
 }
 
-func RcenterCommit() {
-    enterCommitTime = time.Now().UnixNano()
+func RcenterCommit(height int64) {
+    if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.enterCommitTime = time.Now().UnixNano()
 }
 
-func RccommitOver() {
-	commitOverTime = time.Now().UnixNano()
-	RccalcTimeDiff()
+func RccommitOver(height int64) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.commitOverTime = time.Now().UnixNano()
+	RccalcTimeDiff(height)
 }
 
 func GetStringSize(size int) string {
@@ -128,22 +199,47 @@ func GetTimeString(time int64) string {
 	}
 }
 
-func RcBlockHeight(block *Block, blockParts *PartSet) {
-	blockHeight = block.Height
-	blockPartCount = blockParts.count
-	blockSize = len(wire.BinaryBytes(block))
+func RcCMPCTBlock(height int64, block *Block, blockParts *PartSet) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.cmpctBlockPartCount = blockParts.count
+	rT.cmpctBlockSize = len(wire.BinaryBytes(block))
+	// if (ptxInBlock && block.NumTxs > 0) {
+	// 	rT.blockPtxs = block.NumTxs
+	// 	for _, tx := range block.Txs {
+	// 		ptx, _, size := DecodePtx(tx)
+	// 		if (ptx == nil) {
+	// 			fmt.Println("record time decodePtx is nil")
+	// 			continue
+	// 		}
+	// 		rT.blockTxs = rT.blockTxs + (int64)(size)
+	// 	}
+	// } else {
+	// 	rT.blockTxs = block.NumTxs
+	// }
+}
+
+func RcBlock(height int64, block *Block, blockParts *PartSet) {
+	if !printConsensusLog {
+		return
+	}
+	rT := getRecordTimeAtHeight(height)
+	rT.blockPartCount = blockParts.count
+	rT.blockSize = len(wire.BinaryBytes(block))
 	if (ptxInBlock && block.NumTxs > 0) {
-		blockPtxs = block.NumTxs
+		rT.blockPtxs = block.NumTxs
 		for _, tx := range block.Txs {
 			ptx, _, size := DecodePtx(tx)
 			if (ptx == nil) {
 				fmt.Println("record time decodePtx is nil")
 				continue
 			}
-			blockTxs = blockTxs + (int64)(size)
+			rT.blockTxs = rT.blockTxs + (int64)(size)
 		}
 	} else {
-		blockTxs = block.NumTxs
+		rT.blockTxs = block.NumTxs
 	}
 }
 
@@ -176,7 +272,7 @@ func RcSendMsg(id byte, size int) {
 	if (!printSendRecvLog) {
 		return
 	}
-	fmt.Println("*****Block height", blockHeight, "Send msg type", getMsgTypeString(id), "msg size", GetStringSize(size))
+	fmt.Println("*****Block height", "Send msg type", getMsgTypeString(id), "msg size", GetStringSize(size))
 }
 
 func RcReciveMsg(id byte, size int) {
@@ -186,54 +282,63 @@ func RcReciveMsg(id byte, size int) {
 	if (!printSendRecvLog) {
 		return
 	}
-	fmt.Println("*****Block height", blockHeight, "Receive msg type", getMsgTypeString(id), "msg size", GetStringSize(size))
+	fmt.Println("*****Block height", "Receive msg type", getMsgTypeString(id), "msg size", GetStringSize(size))
 
 }
 
-func RccalcTimeDiff() {
+func RccalcTimeDiff(height int64) {
 	if (!printConsensusLog) {
 		return
 	}
+	rT := getRecordTimeAtHeight(height)
 	diff := (int64)(0)
 	interval := (int64)(0)
-	if startNewHeightTime > 0 && commitOverTime > startNewHeightTime {
-		interval = commitOverTime - startNewHeightTime
-		fmt.Println("*****Block height", blockHeight, "interval", GetTimeString(interval))
+	if !parellelPBFT && rT.startNewHeightTime > 0 && rT.commitOverTime > rT.startNewHeightTime {
+		interval = rT.commitOverTime - rT.startNewHeightTime
+		fmt.Println("*****Block height", height, "interval", GetTimeString(interval))
 	}
-	fmt.Println("*****Block height", blockHeight, "block parts", blockPartCount, "block size", GetStringSize(blockSize))
-	startNewHeightTime = commitOverTime
-	if (endCreateBlockTime > 0 && startCreateBlockTime > 0) {
-		diff = endCreateBlockTime - startCreateBlockTime
-		fmt.Println("*****Block height", blockHeight, "create block cost", GetTimeString(diff))
-		fmt.Println("*****Block height", blockHeight, "end create block time", endCreateBlockTime/1000000, "ms")
+	if (rT.cmpctBlockSize > 0) {
+		fmt.Println("*****Block height", height, "cmpct block parts", rT.cmpctBlockPartCount, "size", GetStringSize(rT.cmpctBlockSize))
 	}
-	fmt.Println("*****Block height", blockHeight, "receive block time", recevieBlockTime/1000000, "ms")
-	diff = enterPrevoteTime - enterProposeTime
-	fmt.Println("*****Block height", blockHeight, "propose cost", GetTimeString(diff))
-	diff = enterPrecommitTime - enterPrevoteTime
-	fmt.Println("*****Block height", blockHeight, "prevote cost", GetTimeString(diff))
-	diff = enterCommitTime - enterPrecommitTime
-	fmt.Println("*****Block height", blockHeight, "precommit cost", GetTimeString(diff))
-	diff = commitOverTime - enterCommitTime
-	fmt.Println("*****Block height", blockHeight, "commit cost", GetTimeString(diff))
-	consensusTime := commitOverTime - enterProposeTime
-	if (blockTxs > 0) {
-		tps := blockTxs*1000000000/consensusTime
-		eachTime := consensusTime/blockTxs
+	fmt.Println("*****Block height", height, "block parts", rT.blockPartCount, "size", GetStringSize(rT.blockSize))
+	if !parellelPBFT {
+		rTNext := getRecordTimeAtHeight(height+1)
+		rTNext.startNewHeightTime = rT.commitOverTime
+	}
+	if (rT.endCreateBlockTime > 0 && rT.startCreateBlockTime > 0) {
+		diff = rT.endCreateBlockTime - rT.startCreateBlockTime
+		fmt.Println("*****Block height", height, "create block cost", GetTimeString(diff))
+		fmt.Println("*****Block height", height, "end create block time", rT.endCreateBlockTime/1000000, "ms")
+	}
+	fmt.Println("*****Block height", height, "receive block time", rT.recevieBlockTime/1000000, "ms")
+	diff = rT.enterPrevoteTime - rT.enterProposeTime
+	fmt.Println("*****Block height", height, "propose cost", GetTimeString(diff))
+	diff = rT.enterPrecommitTime - rT.enterPrevoteTime
+	fmt.Println("*****Block height", height, "prevote cost", GetTimeString(diff))
+	diff = rT.enterCommitTime - rT.enterPrecommitTime
+	fmt.Println("*****Block height", height, "precommit cost", GetTimeString(diff))
+	diff = rT.commitOverTime - rT.enterCommitTime
+	fmt.Println("*****Block height", height, "commit cost", GetTimeString(diff))
+	consensusTime := rT.commitOverTime - rT.enterProposeTime
+	if (rT.blockTxs > 0) {
+		tps := rT.blockTxs*1000000000/consensusTime
+		eachTime := consensusTime/rT.blockTxs
 		totalTps := (int64)(0)
 		if (interval > 0) {
-			totalTps = blockTxs*1000000000/interval
+			totalTps = rT.blockTxs*1000000000/interval
 		}
 		if (ptxInBlock) {
-			fmt.Println("*****Block height", blockHeight, "consensus time", GetTimeString(consensusTime), "ptxNum", blockPtxs, "txNum", blockTxs, "each tx cost", GetTimeString(eachTime))
+			fmt.Println("*****Block height", height, "consensus time", GetTimeString(consensusTime), "ptxNum", rT.blockPtxs, "txNum", rT.blockTxs, "each tx cost", GetTimeString(eachTime))
 		} else {
-			fmt.Println("*****Block height", blockHeight, "consensus time", GetTimeString(consensusTime), "txNum", blockTxs, "each tx cost", GetTimeString(eachTime))
+			fmt.Println("*****Block height", height, "consensus time", GetTimeString(consensusTime), "txNum", rT.blockTxs, "each tx cost", GetTimeString(eachTime))
 		}
-		
-		fmt.Println("*****Block height", blockHeight, "consensus tps", tps, "total tps", totalTps)
+		if parellelPBFT {
+			fmt.Println("*****Block height", height, "consensus tps", tps)
+		} else {
+			fmt.Println("*****Block height", height, "consensus tps", tps, "total tps", totalTps)
+		}
 	} else {
-		fmt.Println("*****Block height", blockHeight, "consensus time", GetTimeString(consensusTime))
+		fmt.Println("*****Block height", height, "consensus time", GetTimeString(consensusTime))
 	}
-	reset()
-	blockHeight = blockHeight + 1
+	removeRecordTime(height)
 }
