@@ -54,6 +54,8 @@ TODO: Better handle abci client errors. (make it automatically handle connection
 const cacheSize = 100000
 var removeCacheTx = false
 var usePtxHash = true
+var disablePtx = false
+var compactBlock = true
 
 type TxsMap map[string]struct{}
 
@@ -67,6 +69,7 @@ type Mempool struct {
 	proxyMtx             sync.Mutex
 	proxyAppConn         proxy.AppConnMempool
 	txs                  *clist.CList    // concurrent linked-list of good txs
+	txsHash              *clist.CList    // concurrent linked-list of good txs hash
 	txsHashMap           map[types.TxHash]types.Tx	// tx and hash(app hash) map
 	ptxs                 *clist.CList    // parallel txs
 	ptxsHash             *clist.CList    // parallel txs with tx hash
@@ -104,6 +107,7 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		config:        config,
 		proxyAppConn:  proxyAppConn,
 		txs:           clist.New(),
+		txsHash:       clist.New(),
 		txsHashMap:    make(map[types.TxHash]types.Tx),
 		ptxs:          clist.New(),
 		ptxsHash:      clist.New(),
@@ -125,12 +129,18 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 
 	types.RcPtxInBlock()
 	testConfig, _ := emtConfig.ParseConfig()
-	if (testConfig != nil) {
-		if (testConfig.TestConfig.RepeatTxTest) {
+	if testConfig != nil {
+		if testConfig.TestConfig.RepeatTxTest {
 			removeCacheTx = true
 		}
-		if (!testConfig.TestConfig.UsePtxHash) {
+		if !testConfig.TestConfig.UsePtxHash {
 			usePtxHash = false
+		}
+		if testConfig.TestConfig.DisablePtx {
+			disablePtx = true
+		}
+		if !testConfig.TestConfig.CompactBlock {
+			compactBlock = false
 		}
 	}
 	return mempool
@@ -258,7 +268,11 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 	} else if (from == types.RawTxHash && to == types.RawTx) {
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
-			return true, tx
+			return false, tx
+		} else {
+			mem.fetchingTx = append(mem.fetchingTx, hash[:])
+			mem.NotifiyFetchingTx()
+			return false, nil
 		}
 	} else if (from == types.ParallelTxHash && to == types.ParallelTx) {
 		ptx, _, len := types.DecodePtx(hash)
@@ -406,11 +420,21 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				mem.uncommittedTxs[height] = append(mem.uncommittedTxs[height], memTx)
 			} else {
 				mem.txs.PushBack(memTx)
-				if (usePtxHash) {
+				if (disablePtx || usePtxHash) {
 					mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
 				}
+				if disablePtx && compactBlock {
+					memTxHash := &mempoolTx{
+						counter: mem.counter,
+						height:  mem.height,
+						tx:      types.Tx(r.CheckTx.Data),
+					}
+					mem.txsHash.PushBack(memTxHash)
+				}
+				if disablePtx {
+					mem.notifyTxsAvailable()
+				}
 				mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
-				//mem.notifyTxsAvailable()
 			}
 		} else {
 			// ignore bad transaction
@@ -530,11 +554,20 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 	if maxTxs == 0 {
 		return []types.Tx{}
 	} else if maxTxs < 0 {
-		// maxTxs = mem.txs.Len()
-		maxTxs = mem.ptxsHash.Len()
+		if disablePtx {
+			maxTxs = mem.txs.Len()
+		} else {
+			maxTxs = mem.ptxsHash.Len()
+		}
 	}
 	txLen := 0
-	if (usePtxHash) {
+	if disablePtx {
+		if compactBlock {
+			txLen = mem.txsHash.Len()
+		} else {
+			txLen = mem.txs.Len()
+		}
+	} else if usePtxHash {
 		txLen = mem.ptxsHash.Len()
 	} else {
 		txLen = mem.ptxs.Len()
@@ -543,7 +576,19 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 	txLen = cmn.MinInt(txLen, maxTxs)
 	txs := make([]types.Tx, 0, txLen)
 
-	if (usePtxHash) {
+	if disablePtx {
+		if compactBlock {
+			for e := mem.txsHash.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+				memTx := e.Value.(*mempoolTx)
+				txs = append(txs, memTx.tx)
+			}
+		} else {
+			for e := mem.txs.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+				memTx := e.Value.(*mempoolTx)
+				txs = append(txs, memTx.tx)
+			}
+		}
+	} else if usePtxHash {
 		for e := mem.ptxsHash.Front(); e != nil && len(txs) < txLen; e = e.Next() {
 			memTx := e.Value.(*mempoolTx)
 			txs = append(txs, memTx.tx)
@@ -575,10 +620,33 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	}
 
 	txsMap := make(map[string]struct{})
-	if (usePtxHash) {
+	if disablePtx {
+		if compactBlock {
+			for _, txHash := range txs {
+				txHashMaptx := mem.txsHashMap[types.BytesToHash(txHash)]
+				if (txHashMaptx != nil) {
+					txsMap[string(txHashMaptx)] = struct{}{}
+					delete(mem.txsHashMap, types.BytesToHash(txHash))
+				} else {
+					mem.logger.Error("Update mempool can not find tx", txHash)
+				}
+				// remove from txHash
+				for e := mem.txsHash.Front(); e != nil; e = e.Next() {
+					memTx := e.Value.(*mempoolTx)
+					if types.BytesToHash(txHash) == types.BytesToHash(memTx.tx) {
+						mem.txsHash.Remove(e)
+						e.DetachPrev()
+					}
+				}
+			}
+		} else {
+			for _, tx := range txs {
+				txsMap[string(tx)] = struct{}{}
+			}
+		}
+	} else if usePtxHash {
 		// First, create a lookup map of txns in new txs.
 		for _, tx := range txs {
-			// txsMap[string(tx)] = struct{}{}
 			ptx, _, _ := types.DecodePtx(tx)
 			if (ptx == nil) {
 				cmn.PanicSanity(cmn.Fmt("Update() decodePtx is nil"))

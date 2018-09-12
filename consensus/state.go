@@ -50,6 +50,7 @@ var (
 	compactBlock = true
 	buildFullBlock = false	// use compact block build full block with raw tx
 	broadcastPtxHash = true
+	disablePtx = false
 	loadStateFromStore = false
 )
 
@@ -173,15 +174,18 @@ func NewConsensusState(config *cfg.ConsensusConfig, state sm.State, blockExec *s
 	types.RcInit()
 
 	testConfig, _ := emtConfig.ParseConfig()
-	if (testConfig != nil){
-		if (!testConfig.TestConfig.CompactBlock) {
+	if testConfig != nil {
+		if !testConfig.TestConfig.CompactBlock {
 			compactBlock = false
 		}
-		if (testConfig.TestConfig.BuildFullBlock) {
+		if testConfig.TestConfig.BuildFullBlock {
 			buildFullBlock = true
 		}
-		if (!testConfig.TestConfig.UsePtxHash) {
+		if !testConfig.TestConfig.UsePtxHash {
 			broadcastPtxHash = false
+		}
+		if testConfig.TestConfig.DisablePtx {
+			disablePtx = true
 		}
 	}
 
@@ -862,14 +866,14 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 	rs := cs.GetRoundStateAtHeight(height)
 	// if get all ptx with raw tx, build ProposalBlock with raw tx
 	if (rs.ProposalCMPCTBlock != nil) {
-		ptxs := make([]types.Tx, 0, len(rs.ProposalCMPCTBlock.Txs))
+		txs := make([]types.Tx, 0, len(rs.ProposalCMPCTBlock.Txs))
 		for _, tx := range rs.ProposalCMPCTBlock.Txs {
 			// TODO: handle GetTx return nil, which should not happen
 			_, ptxTemp := cs.mempool.GetTx(tx, types.ParallelTxHash, types.ParallelTx)
-			ptxs = append(ptxs, ptxTemp)
+			txs = append(txs, ptxTemp)
 		}
 		block := rs.ProposalCMPCTBlock
-		block.Data = &types.Data{Txs: ptxs}
+		block.Data = &types.Data{Txs: txs}
 		block.DataHash = block.Data.Hash()
 		rs.ProposalBlock = block
 		rs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
@@ -1256,16 +1260,16 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 		rsB4 = cs.GetRoundStateAtHeight(height - 4).state
 	}
 	if (compactBlock) {
-		ptxsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, ptxsHash, commit)
+		txsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
+		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txsHash, commit)
 		evidence := cs.evpool.PendingEvidence()
 		cmpctBlock.AddEvidence(evidence)
 		block = cmpctBlock
 		blockParts = cmpctBlockParts
 		return block, blockParts, cmpctBlock, cmpctBlockParts
 	} else {
-		ptxs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		block, blockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, ptxs, commit)
+		txs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
+		block, blockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txs, commit)
 		evidence := cs.evpool.PendingEvidence()
 		block.AddEvidence(evidence)
 		cmpctBlock = block
@@ -1972,13 +1976,15 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// assign cmpctblock to block directly
 		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer
 		missTxBool := false
-		if (verify && len(rs.ProposalCMPCTBlock.Txs) != 0) {
+		if verify && len(rs.ProposalCMPCTBlock.Txs) != 0 {
 			for _, tx := range rs.ProposalCMPCTBlock.Txs {
 				missTxs := false
-				if (compactBlock) {
+				if disablePtx {
+					missTxs, _ = cs.mempool.GetTx(tx, types.RawTxHash, types.RawTx)
+				} else if compactBlock {
 					missTxs, _ = cs.mempool.GetTx(tx, types.ParallelTxHash, types.RawTxHash)
 				}
-				if (missTxs) {
+				if missTxs {
 					missTxBool = true
 					cs.Logger.Info("There miss some tx in cmpct block")
 				}
@@ -1986,7 +1992,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		}
 		// if do not need verify(is proposer) or all tx have in local,
 		// Assign ProposalCMPCTBlock to ProposalBlock direclty
-		if (!verify || !missTxBool) {
+		if !verify || !missTxBool {
 			if (broadcastPtxHash && buildFullBlock && len(rs.ProposalCMPCTBlock.Txs) != 0) {
 				cs.buildFullBlockFromCMPCTBlock(height)
 			} else {
