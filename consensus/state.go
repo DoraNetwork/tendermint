@@ -2003,54 +2003,6 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				}
 			}
 		}
-		// we've received ProposalCMPCTBlock, need build ProposalBlock
-		// 1 Verify tx hash we are having in mempool.txs, need app to parse the tx and return missed hash
-		// 2 If tx missing local, need get from remote peer
-		// 3 rebuild the Data, which need app help to rebuild
-		// 4 After rebuild proposalBlock and proposalBlockParts, re-calc the DataHash in header
-		// if !cs.ProposalBlockParts.IsComplete() {
-		// 	if (len(cs.ProposalCMPCTBlock.Txs) == 0) {
-		// 		// cs.handleBuildProposalBlock(nil)
-		// 		cs.ProposalBlock = cs.ProposalCMPCTBlock
-		// 		cs.ProposalBlockParts = cs.ProposalCMPCTBlockParts
-		// 		cs.Logger.Info("Dont have tx, build proposal block", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
-		// 		if cs.Step == cstypes.RoundStepPropose && cs.isProposalComplete() {
-		// 			// Move onto the next step
-		// 			cs.enterPrevote(cs.cmpctBlockHeight, cs.Round)
-		// 		} else if cs.Step == cstypes.RoundStepCommit {
-		// 			// If we're waiting on the proposal block...
-		// 			cs.tryFinalizeCommit(cs.cmpctBlockHeight)
-		// 		}
-		// 	} else {
-		// 		for _, tx := range cs.ProposalCMPCTBlock.Txs {
-		// 			// need to get the hash from application, let app to parse tx and get hash
-		// 			cs.Logger.Debug("cmpct tx hash", tx.Hash)
-		// 			// send GetTxMessage if tx missing
-		// 			// need new goroutine to receive the tx received
-		// 			ptxs := make([]types.Tx, 0, len(cs.ProposalCMPCTBlock.Txs))
-		// 			for _, tx := range cs.ProposalCMPCTBlock.Txs {
-		// 				// TODO: handle GetTx return nil
-		// 				ptx := cs.mempool.GetTx(tx.Hash(), types.ParallelTxHash, types.ParallelTx)
-		// 				if (ptx == nil) {
-		// 					cs.fetching = append(cs.fetching, tx.Hash())
-		// 				} else {
-		// 					ptxs = append(ptxs, ptx)
-		// 				}
-		// 			}
-		// 			if (len(cs.fetching) == 0) {
-		// 				// if get all ptxs, build ProposalBlock now
-		// 				block := cs.ProposalCMPCTBlock
-		// 				block.Data = &types.Data{Txs: ptxs}
-		// 				block.DataHash = block.Data.Hash()
-		// 				cs.ProposalBlock = block
-		// 				cs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
-		// 				cs.Logger.Info("Received complete proposal block", "height", cs.ProposalBlock.Height, "hash", cs.ProposalBlock.Hash())
-		// 			}
-		// 		}
-		// 	}
-		// } else {
-		// 	cs.Logger.Info("Alreay received ProposalBlock")
-		// }
 		return true, err
 	}
 	return added, nil

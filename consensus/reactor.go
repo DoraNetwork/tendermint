@@ -510,21 +510,11 @@ OUTER_LOOP:
 		prs := ps.GetRoundState()
 
 		// Send proposal Block parts?
-		// If proposalBlockParts has header, send proposalCMPCTBlockParts
-		if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
-			if index, ok := rs.ProposalBlockParts.BitArray().Sub(prs.ProposalBlockParts.Copy()).PickRandom(); ok {
-				part := rs.ProposalBlockParts.GetPart(index)
-				logger.Debug("Sending block part", "height", prs.Height, "round", prs.Round)
-				if (compactBlock) {
-					msg := &CMPCTBlockPartMessage{
-						Height: rs.Height, // This tells peer that this part applies to us.
-						Round:  rs.Round,  // This tells peer that this part applies to us.
-						Part:   part,
-					}
-					if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
-						ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
-					}
-				} else {
+		if !compactBlock {
+			if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
+				if index, ok := rs.ProposalBlockParts.BitArray().Sub(prs.ProposalBlockParts.Copy()).PickRandom(); ok {
+					part := rs.ProposalBlockParts.GetPart(index)
+					logger.Debug("Sending block part", "height", prs.Height, "round", prs.Round)
 					msg := &BlockPartMessage{
 						Height: rs.Height, // This tells peer that this part applies to us.
 						Round:  rs.Round,  // This tells peer that this part applies to us.
@@ -532,6 +522,22 @@ OUTER_LOOP:
 					}
 					if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 						ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+					}
+				}
+				continue OUTER_LOOP
+			}
+		} else {
+			if rs.ProposalCMPCTBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
+				if index, ok := rs.ProposalCMPCTBlockParts.BitArray().Sub(prs.ProposalCMPCTBlockParts.Copy()).PickRandom(); ok {
+					part := rs.ProposalCMPCTBlockParts.GetPart(index)
+					logger.Debug("Sending cmpct block part", "height", prs.Height, "round", prs.Round)
+					msg := &CMPCTBlockPartMessage{
+						Height: rs.Height, // This tells peer that this part applies to us.
+						Round:  rs.Round,  // This tells peer that this part applies to us.
+						Part:   part,
+					}
+					if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
+						ps.SetHasProposalCMPCTBlockPart(prs.Height, prs.Round, index)
 					}
 				}
 				continue OUTER_LOOP
