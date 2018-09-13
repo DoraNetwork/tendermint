@@ -125,6 +125,9 @@ type ConsensusState struct {
 	// for store the height when addProposalCMPCTBlock
 	cmpctBlockHeight int64
 
+	// max height of ever received blocks
+	latestHeight int64
+
 	// some functions can be overwritten for testing
 	decideProposal func(height int64, round int)
 	doPrevote      func(height int64, round int)
@@ -221,14 +224,8 @@ func (cs *ConsensusState) GetState() sm.State {
 
 // GetRoundState returns a copy of the internal consensus state.
 func (cs *ConsensusState) GetRoundState() *cstypes.RoundState {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
-	return cs.getRoundState()
-}
-
-func (cs *ConsensusState) getRoundState() *cstypes.RoundState {
-	rs := cs.getRoundStateAtHeight(cs.state.LastBlockHeight).RoundState //copy
-	return &rs
+	wrapper := cs.GetRoundStateAtHeight(cs.latestHeight)
+	return &wrapper.RoundState
 }
 
 // Should be invoked within mutex protection
@@ -304,7 +301,7 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 func (cs *ConsensusState) GetVotesAtHeight(height int64) *cstypes.HeightVoteSet {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	return rs.Votes
 }
 
@@ -412,6 +409,7 @@ func (cs *ConsensusState) OnStart() error {
 
 	// schedule the first 4 rounds!
 	// use GetRoundState so we don't race the receiveRoutine for access
+	cs.latestHeight = cs.state.LastBlockHeight
 	initialHeight = cs.state.LastBlockHeight + 1
 	if (cs.state.LastBlockHeight > 4) {
 		loadStateFromStore = true
@@ -880,6 +878,7 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		cs.Logger.Info("Build proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 		cs.updateMemPool(height, rs)
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
+		cs.updateLatestHeight(height)
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
@@ -1092,6 +1091,8 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 
 		// If we don't get the proposal and all block parts quick enough, enterPrevote
 		cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
+		// enter propose step directly
+		canMoveForward = true
 	} else {
 		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
 		cs.Logger.Debug("This node is a validator")
@@ -1303,7 +1304,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 	}
 
 	if rs.Step < cstypes.RoundStepPropose {
-		cs.Logger.Debug("Not ready to enter prevote")
+		cs.Logger.Debug("Not ready to enter prevote", "Step", rs.Step)
 		return
 	}
 
@@ -1901,6 +1902,13 @@ func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 	cs.mempool.Unlock()
 }
 
+// Update latest block height
+func (cs *ConsensusState) updateLatestHeight(height int64) {
+	if height > cs.latestHeight {
+		cs.latestHeight = height
+	}
+}
+
 // NOTE: block is not necessarily valid.
 // Asynchronously triggers either enterPrevote (before we timeout of propose) or tryFinalizeCommit, once we have the full block.
 func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
@@ -1909,11 +1917,12 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 	// 	return false, nil
 	// }
 
-	// We're not expecting a block part.
-	// if cs.ProposalBlockParts == nil {
-	// 	return false, nil // TODO: bad peer? Return error?
-	// }
 	rs := cs.GetRoundStateAtHeight(height)
+
+	// We're not expecting a block part.
+	if rs.ProposalBlockParts == nil {
+		return false, nil // TODO: bad peer? Return error?
+	}
 	added, err = rs.ProposalBlockParts.AddPart(part, verify)
 	if err != nil {
 		return added, err
@@ -1930,6 +1939,8 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 		cs.updateMemPool(height, rs)
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
+		cs.updateLatestHeight(height)
+
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
@@ -2001,6 +2012,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 				cs.updateMemPool(height, rs)
 				types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
+				cs.updateLatestHeight(height)
 				if cs.isProposalComplete(height) &&
 					(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 					// Move onto the next step
