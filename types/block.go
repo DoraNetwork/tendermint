@@ -41,6 +41,20 @@ func MakeBlock(height int64, txs []Tx, commit *Commit) *Block {
 	return block
 }
 
+// CopyBlockWithTx
+func (b *Block) CopyBlockWithTx(txs []Tx) *Block {
+	block := &Block{
+		Header: b.Header,
+		LastCommit: b.LastCommit,
+		Data: &Data{
+			Txs: txs,
+		},
+		Evidence: b.Evidence,
+	}
+	b.DataHash = block.Data.Hash()
+	return block
+}
+
 // AddEvidence appends the given evidence to the block
 func (b *Block) AddEvidence(evidence []Evidence) {
 	b.Evidence.Evidence = append(b.Evidence.Evidence, evidence...)

@@ -867,14 +867,16 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		txs := make([]types.Tx, 0, len(rs.ProposalCMPCTBlock.Txs))
 		for _, tx := range rs.ProposalCMPCTBlock.Txs {
 			// TODO: handle GetTx return nil, which should not happen
-			_, ptxTemp := cs.mempool.GetTx(tx, types.ParallelTxHash, types.ParallelTx)
-			txs = append(txs, ptxTemp)
+			if disablePtx {
+				_, txTemp := cs.mempool.GetTx(tx, types.RawTxHash, types.RawTx)
+				txs = append(txs, txTemp)
+			} else if compactBlock {
+				_, ptxTemp := cs.mempool.GetTx(tx, types.ParallelTxHash, types.ParallelTx)
+				txs = append(txs, ptxTemp)
+			}
 		}
-		block := rs.ProposalCMPCTBlock
-		block.Data = &types.Data{Txs: txs}
-		block.DataHash = block.Data.Hash()
-		rs.ProposalBlock = block
-		rs.ProposalBlockParts = block.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
+		rs.ProposalBlock = rs.ProposalCMPCTBlock.CopyBlockWithTx(txs)
+		rs.ProposalBlockParts = rs.ProposalBlock.MakePartSet(cs.state.ConsensusParams.BlockGossip.BlockPartSizeBytes)
 		cs.Logger.Info("Build proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 		cs.updateMemPool(height, rs)
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
@@ -895,7 +897,7 @@ func (cs *ConsensusState) handleBuildProposalBlock(height int64, txHash []byte) 
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 
-	if (broadcastPtxHash && buildFullBlock) {
+	if disablePtx || (broadcastPtxHash && buildFullBlock) {
 		cs.buildFullBlockFromCMPCTBlock(height)
 	} else {
 		rs := cs.GetRoundStateAtHeight(height)
@@ -1898,7 +1900,11 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 // Move txs in this block into uncommited txs map
 func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 	cs.mempool.Lock()
-	cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
+	if compactBlock {
+		cs.mempool.Update(height, rs.ProposalCMPCTBlock.Data.Txs)
+	} else {
+		cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
+	}
 	cs.mempool.Unlock()
 }
 
@@ -1991,7 +1997,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 			for _, tx := range rs.ProposalCMPCTBlock.Txs {
 				missTxs := false
 				if disablePtx {
-					missTxs, _ = cs.mempool.GetTx(tx, types.RawTxHash, types.RawTx)
+					missTxs, _ = cs.mempool.GetTx(tx, types.RawTxHash, types.RawTxHash)
 				} else if compactBlock {
 					missTxs, _ = cs.mempool.GetTx(tx, types.ParallelTxHash, types.RawTxHash)
 				}
@@ -2004,7 +2010,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// if do not need verify(is proposer) or all tx have in local,
 		// Assign ProposalCMPCTBlock to ProposalBlock direclty
 		if !verify || !missTxBool {
-			if (broadcastPtxHash && buildFullBlock && len(rs.ProposalCMPCTBlock.Txs) != 0) {
+			if ((broadcastPtxHash && buildFullBlock) || disablePtx) && len(rs.ProposalCMPCTBlock.Txs) != 0 {
 				cs.buildFullBlockFromCMPCTBlock(height)
 			} else {
 				rs.ProposalBlock = rs.ProposalCMPCTBlock

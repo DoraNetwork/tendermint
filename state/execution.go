@@ -16,6 +16,7 @@ import (
 )
 
 var deliverPtxHash = false
+var disablePtx = false
 //-----------------------------------------------------------------------------
 // BlockExecutor handles block execution and state updates.
 // It exposes ApplyBlock(), which validates & executes the block, updates state w/ ABCI responses,
@@ -45,6 +46,9 @@ func NewBlockExecutor(db dbm.DB, logger log.Logger, proxyApp proxy.AppConnConsen
 	mempool types.Mempool, evpool types.EvidencePool) *BlockExecutor {
 	testConfig, _ := emtConfig.ParseConfig()
 	if testConfig != nil && testConfig.TestConfig.UsePtxHash {
+		if testConfig.TestConfig.DisablePtx {
+			disablePtx = true
+		}
 		if testConfig.TestConfig.BuildFullBlock {
 			deliverPtxHash = true
 		} else {
@@ -402,7 +406,7 @@ func updateState(s State, blockID types.BlockID, header *types.Header,
 func fireEvents(logger log.Logger, eventBus types.BlockEventPublisher, block *types.Block, abciResponses *ABCIResponses) {
 	// NOTE: do we still need this buffer ?
 	txEventBuffer := types.NewTxEventBuffer(eventBus, int(block.NumTxs))
-	if !deliverPtxHash {
+	if disablePtx || !deliverPtxHash {
 		for i, tx := range block.Data.Txs {
 			txEventBuffer.PublishEventTx(types.EventDataTx{types.TxResult{
 				Height: block.Height,
@@ -411,7 +415,7 @@ func fireEvents(logger log.Logger, eventBus types.BlockEventPublisher, block *ty
 				Result: *(abciResponses.DeliverTx[i]),
 			}})
 		}
-	} else {
+	} else if deliverPtxHash {
 		for i, txs := range block.Data.Txs {
 			ptx, _, _ := types.DecodePtx(txs)
 			if (ptx == nil) {
@@ -426,6 +430,8 @@ func fireEvents(logger log.Logger, eventBus types.BlockEventPublisher, block *ty
 				}})
 			}
 		}
+	} else {
+		cmn.PanicSanity(cmn.Fmt("Can not fire event"))
 	}
 
 	eventBus.PublishEventNewBlock(types.EventDataNewBlock{block})

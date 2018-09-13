@@ -56,6 +56,7 @@ var removeCacheTx = false
 var usePtxHash = true
 var disablePtx = false
 var compactBlock = true
+var buildFullBlock = true
 
 type TxsMap map[string]struct{}
 
@@ -127,7 +128,6 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 	proxyAppConn.SetResponseCallback(mempool.resCb)
 	mempool.TxsAllRequested = make(chan []byte, 1)
 
-	types.RcPtxInBlock()
 	testConfig, _ := emtConfig.ParseConfig()
 	if testConfig != nil {
 		if testConfig.TestConfig.RepeatTxTest {
@@ -142,6 +142,12 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		if !testConfig.TestConfig.CompactBlock {
 			compactBlock = false
 		}
+		if !testConfig.TestConfig.BuildFullBlock {
+			buildFullBlock = false
+		}
+	}
+	if !disablePtx {
+		types.RcPtxInBlock()
 	}
 	return mempool
 }
@@ -247,10 +253,10 @@ func (mem *Mempool) NotifiyFetchingTx() {
 func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
-	mem.logger.Info("Get tx", "from", from, "to", to)
+	mem.logger.Debug("Get tx", "from", from, "to", to)
 
 	missTx := false
-	if (from == types.ParallelTxHash && to == types.RawTxHash) {
+	if from == types.ParallelTxHash && to == types.RawTxHash {
 		ptx, _, _ := types.DecodePtx(hash)
 		if (ptx == nil) {
 			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
@@ -265,7 +271,7 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			mem.NotifiyFetchingTx()
 			return true, nil
 		}
-	} else if (from == types.RawTxHash && to == types.RawTx) {
+	} else if from == types.RawTxHash && to == types.RawTx {
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
 			return false, tx
@@ -274,7 +280,13 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			mem.NotifiyFetchingTx()
 			return false, nil
 		}
-	} else if (from == types.ParallelTxHash && to == types.ParallelTx) {
+	} else if from == types.RawTxHash && to == types.RawTxHash {
+		if mem.txsHashMap[types.BytesToHash(hash)] == nil {
+			mem.fetchingTx = append(mem.fetchingTx, hash[:])
+			mem.NotifiyFetchingTx()
+			return true, nil
+		}
+	} else if from == types.ParallelTxHash && to == types.ParallelTx {
 		ptx, _, len := types.DecodePtx(hash)
 		if (ptx == nil) {
 			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
@@ -702,6 +714,12 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		mem.ptxsHash.Remove(e)
 	}
 	mem.fetchingTx = mem.fetchingTx[:0]
+
+	mem.logger.Info("After Update() txs size", mem.txs.Len())
+	mem.logger.Info("After Update() txsHash size", mem.txsHash.Len())
+	mem.logger.Info("After Update() ptxs size", mem.ptxs.Len())
+	mem.logger.Info("After Update() ptxsHash size", mem.ptxsHash.Len())
+	mem.logger.Info("After Update() txsHashMap size", len(mem.txsHashMap))
 	//mem.NotifiyFetchingTx()
 	return nil
 }
@@ -732,8 +750,6 @@ func (mem *Mempool) filterTxs(height int64, blockTxsMap map[string]struct{}) []t
 	if len(removedTxs) > 0 {
 		mem.uncommittedTxs[height] = removedTxs
 	}
-
-	mem.logger.Info("After update mempool, tx size", mem.txs.Len())
 	return goodTxs
 }
 
