@@ -641,22 +641,42 @@ OUTER_LOOP:
 }
 func (conR *ConsensusReactor) gossipPipelineDataForCatchup(rs *cstypes.RoundState, prs *cstypes.PeerRoundState,
 	peer p2p.Peer, ps *PeerState, logger log.Logger) {
-	if index, ok := prs.ProposalBlockParts.Not().PickRandom(); ok {
-		// Send the part
-		msg := &BlockPartMessage{
-			Height: prs.Height,
-			Round:  prs.Round,
-			Part:   rs.ProposalBlockParts.GetPart(index),
-		}
-		logger.Debug("Sending pipeline block part for catchup", "round", prs.Round, "index", index)
-		if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
-			ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+	if !compactBlock {
+		if index, ok := prs.ProposalBlockParts.Not().PickRandom(); ok {
+			// Send the part
+			msg := &BlockPartMessage{
+				Height: prs.Height,
+				Round:  prs.Round,
+				Part:   rs.ProposalBlockParts.GetPart(index),
+			}
+			logger.Debug("Sending pipeline block part for catchup", "round", prs.Round, "index", index)
+			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
+				ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
+			} else {
+				logger.Debug("Sending pipeline block part for catchup failed")
+			}
 		} else {
-			logger.Debug("Sending pipeline block part for catchup failed")
+			//logger.Info("No parts to send in catch-up, sleeping")
+			time.Sleep(conR.conS.config.PeerGossipSleep())
 		}
 	} else {
-		//logger.Info("No parts to send in catch-up, sleeping")
-		time.Sleep(conR.conS.config.PeerGossipSleep())
+		if index, ok := prs.ProposalCMPCTBlockParts.Not().PickRandom(); ok {
+			// Send the part
+			msg := &CMPCTBlockPartMessage{
+				Height: prs.Height,
+				Round:  prs.Round,
+				Part:   rs.ProposalCMPCTBlockParts.GetPart(index),
+			}
+			logger.Debug("Sending pipeline block part for catchup", "round", prs.Round, "index", index)
+			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
+				ps.SetHasProposalCMPCTBlockPart(prs.Height, prs.Round, index)
+			} else {
+				logger.Debug("Sending pipeline block part for catchup failed")
+			}
+		} else {
+			//logger.Info("No parts to send in catch-up, sleeping")
+			time.Sleep(conR.conS.config.PeerGossipSleep())
+		}
 	}
 }
 
