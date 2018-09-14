@@ -127,7 +127,7 @@ func (memR *MempoolReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 			}
 			// txs = append(txs, tx)
 			// TODO: send one by one or send together
-			go memR.SendTxMessage(tx, hash, src)
+			go memR.SendTxMessage(hash, tx, src)
 		}
 	default:
 		memR.Logger.Error(fmt.Sprintf("Unknown message type %v", reflect.TypeOf(msg)))
@@ -204,6 +204,7 @@ func (memR *MempoolReactor) broadcastTxRoutine(peer p2p.Peer) {
 
 const (
 	msgTypeTx = byte(0x01)
+	msgTypeGetTx = byte(0x02)
 )
 
 // MempoolMessage is a message sent or received by the MempoolReactor.
@@ -212,6 +213,7 @@ type MempoolMessage interface{}
 var _ = wire.RegisterInterface(
 	struct{ MempoolMessage }{},
 	wire.ConcreteType{&TxMessage{}, msgTypeTx},
+	wire.ConcreteType{&GetTxMessage{}, msgTypeGetTx},
 )
 
 // DecodeMessage decodes a byte-array into a MempoolMessage.

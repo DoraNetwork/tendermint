@@ -88,14 +88,12 @@ func (conR *ConsensusReactor) broadcastGetTxRoutine() {
 	for {
 		select {
 		case fetching := <- conR.conS.mempool.TxsFetching():
-			conR.Logger.Info("broadcastGetTxRoutine fetching hash", fetching)
 			msg := &mempoolR.GetTxMessage{Hash: fetching}
 			for _, peer := range conR.peers {
-				rs := conR.conS.GetRoundState()
 				ps := (*peer).Get(types.PeerStateKey).(*PeerState)
-				prs := ps.GetRoundState()
+				prs := ps.GetRoundStateAtHeight(conR.conS.cmpctBlockHeight)
 				// send GetTxMessage to have proposalBlock one
-				if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
+				if prs.ProposalCMPCTBlockParts.IsFull() {
 					conR.Logger.Info("broadcastGetTxRoutine Send GetTxMessage to peer", (*peer).Key())
 					success := (*peer).Send(mempoolR.MempoolChannel,
 						struct{ mempoolR.MempoolMessage }{msg})
@@ -1027,6 +1025,7 @@ func (ps *PeerState) SetHasProposal(proposal *types.Proposal) {
 	prs.Proposal = true
 	prs.ProposalBlockPartsHeader = proposal.BlockPartsHeader
 	prs.ProposalBlockParts = cmn.NewBitArray(proposal.BlockPartsHeader.Total)
+	prs.ProposalCMPCTBlockParts = cmn.NewBitArray(proposal.BlockPartsHeader.Total)
 	prs.ProposalPOLRound = proposal.POLRound
 	prs.ProposalPOL = nil // Nil until ProposalPOLMessage received.
 }
@@ -1043,6 +1042,7 @@ func (ps *PeerState) InitProposalBlockParts(height int64, partsHeader types.Part
 
 	prs.ProposalBlockPartsHeader = partsHeader
 	prs.ProposalBlockParts = cmn.NewBitArray(partsHeader.Total)
+	prs.ProposalCMPCTBlockParts = cmn.NewBitArray(partsHeader.Total)
 }
 
 // SetHasProposalBlockPart sets the given block part index as known for the peer.

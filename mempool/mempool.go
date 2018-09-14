@@ -135,6 +135,7 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 	mempool.fetchingTx = make([][]byte, 0)
 	proxyAppConn.SetResponseCallback(mempool.resCb)
 	mempool.TxsAllRequested = make(chan []byte, 1)
+	mempool.requestingTx = make(chan [][]byte, 1)
 
 	testConfig, _ := emtConfig.ParseConfig()
 	if testConfig != nil {
@@ -249,11 +250,11 @@ func (mem *Mempool) TxsFetching() <-chan [][]byte {
 
 // NotifiyFetchingTx is set fetchingTx to chan
 // TODO: avoid chan block when there is no peer read the chan
-func (mem *Mempool) NotifiyFetchingTx() {
+func (mem *Mempool) NotifiyFetchingTx(fetchingTxs [][]byte) {
 	if (len(mem.fetchingTx) == 0) {
 		mem.requestingTx <- nil		//clear fetching in mempool/reactor
 	} else {
-		mem.requestingTx <- mem.fetchingTx
+		mem.requestingTx <- fetchingTxs
 	}
 }
 
@@ -264,19 +265,24 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 	mem.logger.Debug("Get tx", "from", from, "to", to)
 
 	missTx := false
+	missedTxs := make([][]byte, 0, 1)
 	if from == types.ParallelTxHash && to == types.RawTxHash {
 		ptx, _, _ := types.DecodePtx(hash)
 		if (ptx == nil) {
 			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
 		}
 		for _, txHash := range ptx.Data.TxIds {
+			txHashTmp := make([]byte, 32)
+			copy(txHashTmp, txHash[:])
 			if (mem.txsHashMap[txHash] == nil) {
-				mem.fetchingTx = append(mem.fetchingTx, txHash[:])
+				mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+				missedTxs = append(missedTxs, txHashTmp)
 				missTx = true
 			}
 		}
 		if (missTx) {
-			mem.NotifiyFetchingTx()
+			mem.logger.Info("Missing tx")
+			mem.NotifiyFetchingTx(missedTxs)
 			return true, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTx {
@@ -284,14 +290,20 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 		if (tx != nil) {
 			return false, tx
 		} else {
-			mem.fetchingTx = append(mem.fetchingTx, hash[:])
-			mem.NotifiyFetchingTx()
+			txHashTmp := make([]byte, 32)
+			copy(txHashTmp, hash[:])
+			mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+			missedTxs = append(missedTxs, txHashTmp)
+			mem.NotifiyFetchingTx(missedTxs)
 			return false, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTxHash {
 		if mem.txsHashMap[types.BytesToHash(hash)] == nil {
-			mem.fetchingTx = append(mem.fetchingTx, hash[:])
-			mem.NotifiyFetchingTx()
+			txHashTmp := make([]byte, 32)
+			copy(txHashTmp, hash[:])
+			mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+			missedTxs = append(missedTxs, txHashTmp)
+			mem.NotifiyFetchingTx(missedTxs)
 			return true, nil
 		}
 	} else if from == types.ParallelTxHash && to == types.ParallelTx {
@@ -299,7 +311,7 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 		if (ptx == nil) {
 			cmn.PanicSanity(cmn.Fmt("decode ptx fail"))
 		}
-		fmt.Println("ptx has tx len", len)
+		mem.logger.Debug("ptx has tx len", len)
 		ptxRawTx := make([][]byte, 0, 1)//mem.txs.Len())
 		for _, txHash := range ptx.Data.TxIds {
 			if (mem.txsHashMap[txHash] == nil) {
@@ -410,13 +422,13 @@ func (mem *Mempool) handleTxArrive(txHash []byte) {
 	}
 	for index, hash := range mem.fetchingTx {
 		if (bytes.Equal(hash, txHash)) {
-			mem.logger.Debug("app broadcast tx match fetching hash", txHash)
-			mem.fetchingTx = append(mem.fetchingTx[:index], mem.fetchingTx[index:]...)
+			mem.fetchingTx = append(mem.fetchingTx[:index], mem.fetchingTx[index+1:]...)
 			break
 		}
 	}
 	if (len(mem.fetchingTx) == 0) {
 		// notify, the txHash not useful now
+		mem.logger.Info("txs all arrived")
 		mem.TxsAllRequested <- txHash
 	}
 }
@@ -470,10 +482,12 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 			mem.logger.Info("Response_GetTx get missed tx hash is", r.GetTx.Response)
 			// TODO: handle missedHash
 			if (r.GetTx.Response != nil) {
+				missedTxs := make([][]byte, 0)
 				mem.fetchingTx = append(mem.fetchingTx, r.GetTx.Response)
+				missedTxs = append(missedTxs, r.GetTx.Response)
 				// send GetTx message to remote peer
 				// TODO: notify together, current is each pts to notify
-				mem.NotifiyFetchingTx()
+				mem.NotifiyFetchingTx(missedTxs)
 			}
 		} else {
 			mem.logger.Info("Response_GetTx return error", r.GetTx.Code)
@@ -752,7 +766,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	// Recheck mempool txs if any txs were committed in the block
 	// NOTE/XXX: in some apps a tx could be invalidated due to EndBlock,
 	//	so we really still do need to recheck, but this is for debugging
-	if mem.config.Recheck && (mem.config.RecheckEmpty || len(txs) > 0) {
+	if false && mem.config.Recheck && (mem.config.RecheckEmpty || len(txs) > 0) {
 		mem.logger.Info("Recheck txs", "numtxs", len(goodTxs), "height", height)
 		mem.recheckTxs(goodTxs)
 		// At this point, mem.txs are being rechecked.

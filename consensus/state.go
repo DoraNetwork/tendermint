@@ -664,7 +664,7 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 			cs.handleTxsAvailable(height)
 		case txHash := <-cs.mempool.TxResponsed():
 			// FIXME: pass correct height from mempool
-			cs.handleBuildProposalBlock(1, txHash)
+			cs.handleBuildProposalBlock(cs.cmpctBlockHeight, txHash)
 		case mi = <-cs.peerMsgQueue:
 			cs.wal.Save(mi)
 			// handles proposals, block parts, votes
@@ -2006,6 +2006,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 					cs.Logger.Info("There miss some tx in cmpct block")
 				}
 			}
+			cs.Logger.Info("verify GetTx over")
 		}
 		// if do not need verify(is proposer) or all tx have in local,
 		// Assign ProposalCMPCTBlock to ProposalBlock direclty
