@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/pkg/errors"
 
@@ -58,6 +60,16 @@ var disablePtx = false
 var compactBlock = true
 var buildFullBlock = true
 
+var replay_txs bool = false
+var replay_same bool = false
+var replay_loop bool = false
+var replay_amount int = 0
+var replay_txid_base int = 0
+var replay_txid int = 0
+var updated bool = false
+var replayTx types.Tx
+var repeatTxEpoch = (int)(10000)
+
 type TxsMap map[string]struct{}
 
 // Mempool is an ordered in-memory pool for transactions before they are proposed in a consensus
@@ -93,6 +105,7 @@ type Mempool struct {
 	wal *auto.AutoFile
 
 	logger log.Logger
+	txsCh chan *txsSet
 
 	// Keep track of uncommitted transactions
 	uncommittedTxs       map[int64]([]*mempoolTx)
@@ -103,6 +116,11 @@ type Mempool struct {
 
 	// Keep track of all transactions in pending blocks
 	pendingBlockTxs      map[int64]TxsMap
+}
+
+
+type txsSet struct {
+	txs types.Txs
 }
 
 // NewMempool returns a new Mempool with the given configuration and connection to an application.
@@ -153,6 +171,19 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		}
 		if !testConfig.TestConfig.BuildFullBlock {
 			buildFullBlock = false
+		}
+		if testConfig.TestConfig.ReplayTxInMempool > 0 {
+			replay_txs = true
+			if testConfig.TestConfig.ReplayTxInMempool == 1 {
+				replay_same = true
+			}
+			repeatTxEpoch = testConfig.TestConfig.ReplayNumEpoch
+		}
+		if replay_txs {
+			mempool.initSQL()
+		}
+		if replay_same {
+			replayTx = mempool.readOneTx()
 		}
 	}
 	if !disablePtx {
@@ -206,6 +237,120 @@ func (mem *Mempool) initWAL() {
 		}
 		mem.wal = af
 	}
+}
+
+func (mem *Mempool) initSQL() {
+	db, err := sql.Open("sqlite3", "./record_account_txs.db")
+	if err != nil {
+		fmt.Printf("********open sqlite3 error\n")
+	}
+	defer db.Close()
+
+	sql := `CREATE TABLE IF NOT EXISTS txs (txId integer, tx blob);`
+	db.Exec(sql)
+}
+
+func (mem *Mempool) readOneTx() types.Tx {
+	db, err := sql.Open("sqlite3", "./record_account_txs.db")
+	if err != nil {
+		fmt.Printf("********open sqlite3 error\n")
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT * FROM txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", 0, 1)
+	if err != nil {
+		fmt.Printf("********db query error\n")
+	}
+	defer rows.Close()
+	for rows.Next() {
+        var txid int
+        var tx types.Tx
+		rows.Scan(&txid, &tx)
+		return tx
+	}
+	return nil
+}
+
+// maxTxs: -1 means uncapped, 0 means none
+func (mem *Mempool) collectTxs_replay(maxTxs int) types.Txs {
+	if maxTxs == 0 {
+		return []types.Tx{}
+	} else if maxTxs < 0 {
+		maxTxs = mem.txs.Len()
+	}
+
+	txsset := <-mem.txsCh
+
+	go mem.replay_next_txs(maxTxs) //for next replay
+	return txsset.txs
+}
+
+// maxTxs: -1 means uncapped, 0 means none
+func (mem *Mempool) replay_next_txs(maxTxs int) {
+	if updated {
+		updated = false
+	} else {
+		fmt.Printf("**********************miss one update\n")
+	}
+
+	db, err := sql.Open("sqlite3", "./record_account_txs.db")
+	//db, err := sql.Open("sqlite3", "./record_contract_txs.db")
+	if err != nil {
+		fmt.Printf("********open sqlite3 error\n")
+	}
+	defer db.Close()
+
+	if replay_loop {
+		if replay_txid + replay_amount > ((50000 + replay_amount - 1)/replay_amount)*replay_amount {
+			replay_txid = 0
+			fmt.Printf("******************replay loopback\n")
+		}
+		if replay_same {
+			replay_txid = 0
+		}
+	} else {
+		if replay_txid + replay_amount > 5000000 {
+			replay_txs = false
+			fmt.Printf("******************replay done\n")
+			return
+		}
+	}
+
+	from := replay_txid_base + replay_txid
+	to := replay_txid_base + replay_txid + replay_amount - 1
+
+	if replay_same {
+		to = from
+	}
+	rows, err := db.Query("SELECT * FROM txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", from, to)
+	//rows, err := db.Query("SELECT * FROM depoly_txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", from, to)
+    //rows, err := db.Query("SELECT * FROM deposit_txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", from, to)
+    //rows, err := db.Query("SELECT * FROM withdraw_txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", from, to)
+    if err != nil {
+       fmt.Printf("********db query error\n")
+    }
+    defer rows.Close()
+
+    next_txs := make([]types.Tx, 0, maxTxs)
+    fmt.Printf("******************** next %d txs start from %d\n", replay_amount, from)
+    for rows.Next() {
+        var txid int
+        var tx []byte
+        rows.Scan(&txid, &tx)
+        //fmt.Printf("********Mingwei, txid: %d, %x\n", txid, tx)
+        if replay_same {
+           for ; len(next_txs) < replay_amount;  {
+               next_txs = append(next_txs, tx)
+           }
+           break
+        } else {
+           next_txs = append(next_txs, tx)
+        }
+    }
+
+    txsset := &txsSet{
+        txs: next_txs,
+    }
+    mem.txsCh <- txsset
 }
 
 // Lock locks the mempool. The consensus must be able to hold lock to safely update.
@@ -612,14 +757,26 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 
 	if disablePtx {
 		if compactBlock {
-			for e := mem.txsHash.Front(); e != nil && len(txs) < txLen; e = e.Next() {
-				memTx := e.Value.(*mempoolTx)
-				txs = append(txs, memTx.tx)
+			if replay_same {
+				for i := 0; i < repeatTxEpoch; i ++ {
+					txs = append(txs, replayTx)
+				}
+			} else {
+				for e := mem.txsHash.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+					memTx := e.Value.(*mempoolTx)
+					txs = append(txs, memTx.tx)
+				}
 			}
 		} else {
-			for e := mem.txs.Front(); e != nil && len(txs) < txLen; e = e.Next() {
-				memTx := e.Value.(*mempoolTx)
-				txs = append(txs, memTx.tx)
+			if replay_same {
+				for i := 0; i < repeatTxEpoch; i ++ {
+					txs = append(txs, replayTx)
+				}
+			} else {
+				for e := mem.txs.Front(); e != nil && len(txs) < txLen; e = e.Next() {
+					memTx := e.Value.(*mempoolTx)
+					txs = append(txs, memTx.tx)
+				}
 			}
 		}
 	} else if usePtxHash {
@@ -642,6 +799,8 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 // TODO: remove the tx in tx map, current can not remove as txs are ptx hash
 // TODO: handle tx,ptx,ptxhash...cases
 func (mem *Mempool) Update(height int64, txs types.Txs) error {
+    updated = true
+    replay_txid += replay_amount
 	if err := mem.proxyAppConn.FlushSync(); err != nil { // To flush async resCb calls e.g. from CheckTx
 		return err
 	}
@@ -703,7 +862,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					delete(mem.txsHashMap, types.BytesToHash(txHash))
 					mem.uncommittedTxsHashMap[types.BytesToHash(txHash)] = txHashMaptx
 				} else {
-					mem.logger.Error("Update mempool can not find tx", txHash)
+					if !replay_txs {
+						mem.logger.Error("Update mempool can not find tx", txHash)
+					}
 				}
 				// remove from txHash
 				for e := mem.txsHash.Front(); e != nil; e = e.Next() {
