@@ -31,6 +31,9 @@ type RecordTime struct {
 
 var (
 	parellelPBFT = true
+	parellelSteps = (int64)(4)
+	parellelTxs = (int64)(0)
+	parellelStartTime = (int64)(0)
 	printConsensusLog = false
 	printSendRecvLog = false
 	ptxInBlock = false
@@ -297,6 +300,12 @@ func RccalcTimeDiff(height int64) {
 		interval = rT.commitOverTime - rT.startNewHeightTime
 		fmt.Println("*****Block height", height, "interval", GetTimeString(interval))
 	}
+	if parellelPBFT {
+		if height % parellelSteps == 0 && parellelStartTime > 0 {
+			interval = rT.commitOverTime - parellelStartTime
+			fmt.Println("*****Block height", height, "interval for 4 is", GetTimeString(interval))
+		}
+	}
 	if (rT.cmpctBlockSize > 0) {
 		fmt.Println("*****Block height", height, "cmpct block parts", rT.cmpctBlockPartCount, "size", GetStringSize(rT.cmpctBlockSize))
 	}
@@ -304,6 +313,8 @@ func RccalcTimeDiff(height int64) {
 	if !parellelPBFT {
 		rTNext := getRecordTimeAtHeight(height+1)
 		rTNext.startNewHeightTime = rT.commitOverTime
+	} else if height % parellelSteps == 0 {
+		parellelStartTime = rT.commitOverTime
 	}
 	if (rT.endCreateBlockTime > 0 && rT.startCreateBlockTime > 0) {
 		diff = rT.endCreateBlockTime - rT.startCreateBlockTime
@@ -333,7 +344,16 @@ func RccalcTimeDiff(height int64) {
 			fmt.Println("*****Block height", height, "consensus time", GetTimeString(consensusTime), "txNum", rT.blockTxs, "each tx cost", GetTimeString(eachTime))
 		}
 		if parellelPBFT {
-			fmt.Println("*****Block height", height, "consensus tps", tps)
+			if height > 4 {
+				parellelTxs = parellelTxs + rT.blockTxs
+			}
+			if height % parellelSteps == 0  && interval > 0 {
+				parellelTps := parellelTxs*1000000000/interval
+				fmt.Println("*****Block height", height, "txNum in 4 is", parellelTxs, "consensus tps", tps, "total tps", parellelTps)
+				parellelTxs = 0
+			} else {
+				fmt.Println("*****Block height", height, "consensus tps", tps)
+			}
 		} else {
 			fmt.Println("*****Block height", height, "consensus tps", tps, "total tps", totalTps)
 		}
