@@ -249,6 +249,7 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
+	cs.latestHeight = height
 	for h := range cs.roundStates {
 		if h > height {
 			delete(cs.roundStates, h)

@@ -504,7 +504,7 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 		if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
 			if index, ok := rs.ProposalBlockParts.BitArray().Sub(prs.ProposalBlockParts.Copy()).PickRandom(); ok {
 				part := rs.ProposalBlockParts.GetPart(index)
-				logger.Debug("Sending block part", "height", prs.Height, "round", prs.Round)
+				logger.Debug("Sending block part", "height", rs.Height, "round", rs.Round)
 				msg := &BlockPartMessage{
 					Height: rs.Height, // This tells peer that this part applies to us.
 					Round:  rs.Round,  // This tells peer that this part applies to us.
@@ -542,7 +542,7 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 		// Proposal: share the proposal metadata with peer.
 		{
 			msg := &ProposalMessage{Proposal: rs.Proposal}
-			logger.Debug("Sending proposal", "height", prs.Height, "round", prs.Round)
+			logger.Debug("Sending proposal", "height", rs.Height, "round", rs.Round)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposal(rs.Proposal)
 			}
@@ -557,7 +557,7 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 				ProposalPOLRound: rs.Proposal.POLRound,
 				ProposalPOL:      rs.Votes.Prevotes(rs.Proposal.POLRound).BitArray(),
 			}
-			logger.Debug("Sending POL", "height", prs.Height, "round", prs.Round)
+			logger.Debug("Sending POL", "height", rs.Height, "round", rs.Round)
 			peer.Send(DataChannel, struct{ ConsensusMessage }{msg})
 		}
 		return true
@@ -976,8 +976,9 @@ type PeerState struct {
 	mtx sync.Mutex
 	// peer's round states on each pipeline
 	roundStates map[int64]*cstypes.PeerRoundState
-	// max height among received round states
+	// max height/round among received round states
 	latestHeight int64
+	latestRound  int
 }
 
 // NewPeerState returns a new PeerState for the given Peer
@@ -987,6 +988,7 @@ func NewPeerState(peer p2p.Peer) *PeerState {
 		logger: log.NewNopLogger(),
 		roundStates: make(map[int64]*cstypes.PeerRoundState),
 		latestHeight: 0,
+		latestRound:  0,
 	}
 }
 
@@ -1289,20 +1291,19 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	// psCatchupCommit := ps.CatchupCommit
 
 	startTime := time.Now().Add(-1 * time.Duration(msg.SecondsSinceStartTime) * time.Second)
-	prs.Height = msg.Height
-	prs.Round = msg.Round
 	prs.Step = msg.Step
 	prs.StartTime = startTime
-	// if psHeight != msg.Height || psRound != msg.Round {
-	// 	ps.Proposal = false
-	// 	ps.ProposalBlockPartsHeader = types.PartSetHeader{}
-	// 	ps.ProposalBlockParts = nil
-	// 	ps.ProposalPOLRound = -1
-	// 	ps.ProposalPOL = nil
-	// 	// We'll update the BitArray capacity later.
-	// 	ps.Prevotes = nil
-	// 	ps.Precommits = nil
-	// }
+	if prs.Round != msg.Round {
+		prs.Proposal = false
+		prs.ProposalBlockPartsHeader = types.PartSetHeader{}
+		prs.ProposalBlockParts = nil
+		prs.ProposalPOLRound = -1
+		prs.ProposalPOL = nil
+		// We'll update the BitArray capacity later.
+		prs.Prevotes = nil
+		prs.Precommits = nil
+		prs.Round = msg.Round
+	}
 	// if psHeight == msg.Height && psRound != msg.Round && msg.Round == psCatchupCommitRound {
 		// Peer caught up to CatchupCommitRound.
 		// Preserve psCatchupCommit!
@@ -1324,10 +1325,19 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	// 	ps.CatchupCommit = nil
 	// }
 
-	// update latest block height if peer has entered prevote
-	if msg.Step >= cstypes.RoundStepPrevote {
+	if msg.Round > ps.latestRound {
+		// rollback happened, clear afterward round states
+		for i := msg.Height+1; i < msg.Height+4; i++ {
+			delete(ps.roundStates, int64(i))
+		}
+		// update both height and round
+		ps.latestHeight = msg.Height
+		ps.latestRound = msg.Round
+	} else if msg.Step >= cstypes.RoundStepPrevote {
+		// update latest block height if peer has entered prevote
 		if msg.Height > ps.latestHeight {
 			ps.latestHeight = msg.Height
+			ps.latestRound = msg.Round
 		}
 	}
 }
