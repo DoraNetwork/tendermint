@@ -1575,7 +1575,7 @@ func (cs *ConsensusState) canEnterPrecommit(height int64) bool {
 		return false
 	}
 
-	if cs.isStepTimeout(height, cstypes.RoundStepPrevote) {
+	if cs.isStepTimeout(height, cstypes.RoundStepPrevoteWait) {
 		return true
 	}
 
@@ -1912,7 +1912,10 @@ func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 // Update latest block height
 func (cs *ConsensusState) updateLatestHeight(height int64) {
 	if height > cs.latestHeight {
-		cs.latestHeight = height
+		rs := cs.GetRoundStateAtHeight(height)
+		if rs.Proposal !=  nil {
+			cs.latestHeight = height
+		}
 	}
 }
 

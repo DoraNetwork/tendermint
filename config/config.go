@@ -240,10 +240,10 @@ func DefaultP2PConfig() *P2PConfig {
 		AddrBook:                "addrbook.json",
 		AddrBookStrict:          true,
 		MaxNumPeers:             50,
-		FlushThrottleTimeout:    100,
+		FlushThrottleTimeout:    10,
 		MaxMsgPacketPayloadSize: 1024,   // 1 kB
-		SendRate:                512000, // 500 kB/s
-		RecvRate:                512000, // 500 kB/s
+		SendRate:                51200000, // 500 kB/s
+		RecvRate:                51200000, // 500 kB/s
 		PexReactor:              true,
 	}
 }

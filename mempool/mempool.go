@@ -751,6 +751,9 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 	} else {
 		txLen = mem.ptxs.Len()
 	}
+	if txLen == 0 {
+		return []types.Tx{}
+	}
 
 	txLen = cmn.MinInt(txLen, maxTxs)
 	txs := make([]types.Tx, 0, txLen)
