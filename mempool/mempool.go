@@ -3,6 +3,7 @@ package mempool
 import (
 	"bytes"
 	"container/list"
+	"os"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,7 @@ var replay_txid_base int = 0
 var replay_txid int = 0
 var updated bool = false
 var replayTx types.Tx
+var replayHashTx map[types.TxHash]types.Tx
 var repeatTxEpoch = (int)(10000)
 
 type TxsMap map[string]struct{}
@@ -183,6 +185,7 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 			mempool.initSQL()
 		}
 		if replay_same {
+			replayHashTx = make(map[types.TxHash]types.Tx)
 			replayTx = mempool.readOneTx()
 		}
 	}
@@ -251,23 +254,40 @@ func (mem *Mempool) initSQL() {
 }
 
 func (mem *Mempool) readOneTx() types.Tx {
-	db, err := sql.Open("sqlite3", "./record_account_txs.db")
+	var data = make([]byte, 1000)
+	f, err := os.Open("./replayOneData")
 	if err != nil {
-		fmt.Printf("********open sqlite3 error\n")
 	}
-	defer db.Close()
-	rows, err := db.Query("SELECT * FROM txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", 0, 1)
+	_, err = f.Read(data)
 	if err != nil {
-		fmt.Printf("********db query error\n")
 	}
-	defer rows.Close()
-	for rows.Next() {
-        var txid int
-        var tx types.Tx
-		rows.Scan(&txid, &tx)
-		return tx
+	txHash := data[0:32]
+	tx := data[32:132]
+	fmt.Println("---------------------")
+	fmt.Println("hash", txHash, "tx", tx)
+	fmt.Println("---------------------")
+	replayHashTx[types.BytesToHash(txHash)] = tx[:]
+	if compactBlock {
+		return txHash
 	}
-	return nil
+	return tx
+	// db, err := sql.Open("sqlite3", "./record_account_txs.db")
+	// if err != nil {
+	// 	fmt.Printf("********open sqlite3 error\n")
+	// }
+	// defer db.Close()
+	// rows, err := db.Query("SELECT * FROM txs WHERE txId BETWEEN $1 AND $2 ORDER BY txId ASC", 0, 1)
+	// if err != nil {
+	// 	fmt.Printf("********db query error\n")
+	// }
+	// defer rows.Close()
+	// for rows.Next() {
+    //     var txid int
+    //     var tx types.Tx
+	// 	rows.Scan(&txid, &tx)
+	// 	return tx
+	// }
+	// return nil
 }
 
 // maxTxs: -1 means uncapped, 0 means none
@@ -431,6 +451,11 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			return true, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTx {
+		if replay_txs {
+			if replay_same {
+				return false, replayHashTx[types.BytesToHash(hash)]
+			}
+		}
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
 			return false, tx
@@ -443,6 +468,11 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			return false, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTxHash {
+		if replay_txs {
+			if replay_same {
+				return false, nil
+			}
+		}
 		if mem.txsHashMap[types.BytesToHash(hash)] == nil {
 			txHashTmp := make([]byte, 32)
 			copy(txHashTmp, hash[:])
@@ -596,6 +626,14 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 			if height := mem.isInPendingBlock(tx); height > 0 {
 				mem.uncommittedTxs[height] = append(mem.uncommittedTxs[height], memTx)
 			} else {
+				// f, _ := os.Create("/tmp/replaydata")
+				// defer f.Close()
+				// fmt.Println("--------------------")
+				// fmt.Println("hash len", len(r.CheckTx.Data), "data len", len(tx))
+				// fmt.Println("--------------------")
+				// f.Write(r.CheckTx.Data)
+				// f.Write(tx)
+				// f.Sync()
 				mem.txs.PushBack(memTx)
 				if (disablePtx || usePtxHash) {
 					mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
@@ -751,7 +789,7 @@ func (mem *Mempool) collectTxs(maxTxs int) types.Txs {
 	} else {
 		txLen = mem.ptxs.Len()
 	}
-	if txLen == 0 {
+	if !replay_txs && txLen == 0 {
 		return []types.Tx{}
 	}
 
