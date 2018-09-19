@@ -412,13 +412,13 @@ func (cs *ConsensusState) OnStart() error {
 	// use GetRoundState so we don't race the receiveRoutine for access
 	cs.latestHeight = cs.state.LastBlockHeight
 	initialHeight = cs.state.LastBlockHeight + 1
-	if (cs.state.LastBlockHeight > 4) {
-		loadStateFromStore = true
-		for i := 0; i <= 3; i++ {
+	loadStateFromStore = true
+	for i := 0; i <= 3; i++ {
+		if cs.state.LastBlockHeight - int64(i) > 0 {
 			cs.GetRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
 		}
-		loadStateFromStore = false
 	}
+	loadStateFromStore = false
 	for i := 1; i <= 4; i++ {
 		cs.scheduleRound0(cs.GetRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
 	}
