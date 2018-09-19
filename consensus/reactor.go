@@ -756,6 +756,20 @@ OUTER_LOOP:
 		//logger.Debug("gossipVotesRoutine", "rsHeight", rs.Height, "rsRound", rs.Round,
 		//	"prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
 
+		// If height is lower than peer
+		if rs.Height < prs.Height {
+			peerRs := ps.GetRoundStateAtHeight(rs.Height)
+			// Case 1: Rollback happened so rs.Round > peerRs.Round
+			// Case 2: peerRs.Height has not entered commit step
+			// Send precommit votes to peer to move forward
+			if rs.Round > peerRs.Round || peerRs.Step <= cstypes.RoundStepWaitToCommit {
+				if ps.PickSendVote(rs.Votes.Precommits(peerRs.Round)) {
+					logger.Debug("Send rs.Precommits(prs.Round) to peer", "round", prs.Round)
+					continue OUTER_LOOP
+				}
+			}
+		}
+
 		// If height matches, then send LastCommit, Prevotes, Precommits.
 		if rs.Height >= prs.Height && rs.Height < prs.Height+4 {
 			// prs.Height has entered prevote, so prs.Height-1 should

@@ -1446,7 +1446,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	}
 
 	// Must enter prevote before entering precommit
-	if rs.Step < cstypes.RoundStepPrevote {
+	if rs.Step < cstypes.RoundStepPrevote || !rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
 		cs.Logger.Debug("Not ready to enter precommit")
 		return
 	}
