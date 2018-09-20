@@ -1979,6 +1979,10 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	// }
 	rs := cs.GetRoundStateAtHeight(height)
 	// added, err = cs.ProposalBlockParts.AddPart(part, verify)
+	// We're not expecting a block part.
+	if rs.ProposalCMPCTBlockParts == nil {
+		return false, nil // TODO: bad peer? Return error?
+	}
 	added, err = rs.ProposalCMPCTBlockParts.AddPart(part, verify)
 	if err != nil {
 		return added, err
