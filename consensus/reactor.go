@@ -761,10 +761,10 @@ OUTER_LOOP:
 			peerRs := ps.GetRoundStateAtHeight(rs.Height)
 			// Case 1: Rollback happened so rs.Round > peerRs.Round
 			// Case 2: peerRs.Height has not entered commit step
-			// Send precommit votes to peer to move forward
+			// Send necessary votes to peer to move forward
 			if rs.Round > peerRs.Round || peerRs.Step <= cstypes.RoundStepWaitToCommit {
-				if ps.PickSendVote(rs.Votes.Precommits(peerRs.Round)) {
-					logger.Debug("Send rs.Precommits(prs.Round) to peer", "round", prs.Round)
+				heightLogger := logger.With("height", rs.Height)
+				if conR.gossipVotesForHeight(heightLogger, rs, peerRs, ps) {
 					continue OUTER_LOOP
 				}
 			}
@@ -1339,7 +1339,7 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	// 	ps.CatchupCommit = nil
 	// }
 
-	if msg.Round > ps.latestRound {
+	if msg.Step == cstypes.RoundStepPropose && msg.Round > ps.latestRound {
 		// rollback happened, clear afterward round states
 		for i := msg.Height+1; i < msg.Height+4; i++ {
 			delete(ps.roundStates, int64(i))

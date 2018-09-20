@@ -1092,10 +1092,12 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 			cs.Logger.Debug("This node is not a validator")
 		}
 
-		// If we don't get the proposal and all block parts quick enough, enterPrevote
-		cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
-		// enter propose step directly
-		canMoveForward = true
+		if canMoveForward {
+			// If we don't get the proposal and all block parts quick enough, enterPrevote
+			cs.scheduleTimeout(cs.config.Propose(round), height, round, cstypes.RoundStepPropose)
+		} else {
+			cs.enterWaitToPropose(height, round)
+		}
 	} else {
 		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
 		cs.Logger.Debug("This node is a validator")
@@ -1115,16 +1117,18 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 
 func (cs *ConsensusState) canEnterPropose(height int64) bool {
 	if height == initialHeight {
-			return true
+		return true
 	}
 
 	preRs := cs.GetRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepPrevote {
-			return false
+		cs.Logger.Debug("Can't enter propose: preRs.Step < RoundStepPrevote", "preRs.Step", preRs.Step)
+		return false
 	}
 
 	// Previous height's proposal not available, wait
 	if !preRs.IsProposalComplete() {
+		cs.Logger.Debug("Can't enter propose: !preRs.IsProposalComplete()")
 		return false
 	}
 
@@ -1132,15 +1136,17 @@ func (cs *ConsensusState) canEnterPropose(height int64) bool {
 	if !cs.config.PipelineNonstop() {
 		rs := cs.GetRoundStateAtHeight(height)
 		if !rs.timeout[cstypes.RoundStepNewHeight] {
+			cs.Logger.Debug("Can't enter propose: !rs.timeout[cstypes.RoundStepNewHeight]")
 			return false
 		}
 	}
 
+	cs.Logger.Debug("Can enter propose: all conditions met")
 	return true
 }
 
 func (cs *ConsensusState) enterWaitToPropose(height int64, round int) {
-	cs.Logger.Debug("enterWaitToPropse:", "height", height, "round", round)
+	cs.Logger.Info("enterWaitToPropse:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToPropose)
 	cs.newStep(height)
 }
@@ -1307,7 +1313,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 	}
 
 	if rs.Step < cstypes.RoundStepPropose {
-		cs.Logger.Debug("Not ready to enter prevote", "Step", rs.Step)
+		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Not ready to enter prevote. Current step: %v", height, round, rs.Step))
 		return
 	}
 
@@ -1337,6 +1343,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 	// Sign and broadcast vote as necessary
 	if canMoveForward {
 		cs.doPrevote(height, round)
+		cs.updateLatestHeight(height)
 	} else {
 		// enter wait-to-prevote step, woken up when previous height enters precommit
 		cs.enterWaitToPrevote(height, round)
@@ -1353,22 +1360,26 @@ func (cs *ConsensusState) canEnterPrevote(height int64) bool {
 
 	preRs := cs.GetRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepPrecommit {
+		cs.Logger.Debug("Can't enter prevote: preRs.Step < RoundStepPrecommit", "preRs.Step", preRs.Step)
 		return false
 	}
 
 	if cs.isStepTimeout(height, cstypes.RoundStepPropose) {
+		cs.Logger.Debug("Can enter prevote: step RoundStepPropose timeout")
 		return true
 	}
 
 	if cs.isProposalComplete(height) {
+		cs.Logger.Debug("Can enter prevote: proposal complete")
 		return true
 	}
 
+	cs.Logger.Debug("Can't enter prevote: none condition met")
 	return false
 }
 
 func (cs *ConsensusState) enterWaitToPrevote(height int64, round int) {
-	cs.Logger.Debug("enterWaitToPrevote:", "height", height, "round", round)
+	cs.Logger.Info("enterWaitToPrevote:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToPrevote)
 	cs.newStep(height)
 }
@@ -1447,7 +1458,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 
 	// Must enter prevote before entering precommit
 	if rs.Step < cstypes.RoundStepPrevote || !rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
-		cs.Logger.Debug("Not ready to enter precommit")
+		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Not ready to enter precommit. Current step: %v", height, round, rs.Step))
 		return
 	}
 
@@ -1572,23 +1583,27 @@ func (cs *ConsensusState) canEnterPrecommit(height int64) bool {
 
 	preRs := cs.GetRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepCommit {
+		cs.Logger.Debug("Can't enter precommit: preRs.Step < RoundStepCommit", "preRs.Step", preRs.Step)
 		return false
 	}
 
 	if cs.isStepTimeout(height, cstypes.RoundStepPrevoteWait) {
+		cs.Logger.Debug("Can enter precommit: step RoundStepPrevoteWait timeout")
 		return true
 	}
 
 	rs := cs.GetRoundStateAtHeight(height)
-	if rs.Votes.Prevotes(rs.Round).HasTwoThirdsMajority() {
+	if rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
+		cs.Logger.Debug("Can enter precommit: got +2/3 votes")
 		return true
 	}
 
+	cs.Logger.Debug("Can't enter precommit: none condition met")
 	return false
 }
 
 func (cs *ConsensusState) enterWaitToPrecommit(height int64, round int) {
-	cs.Logger.Debug("enterWaitToPrecommit:", "height", height, "round", round)
+	cs.Logger.Info("enterWaitToPrecommit:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToPrecommit)
 	cs.newStep(height)
 }
@@ -1625,7 +1640,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 	}
 
 	if rs.Step < cstypes.RoundStepPrecommit {
-		cs.Logger.Debug("Not ready to enter commit")
+		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Not ready to enter commit. Current step: %v", height, commitRound, rs.Step))
 		return
 	}
 
@@ -1692,6 +1707,7 @@ func (cs *ConsensusState) canEnterCommit(height int64) bool {
 	}
 
 	if cs.state.LastBlockHeight != height - 1 {
+		cs.Logger.Debug("Can't enter commit: LastBlockHeight != height-1", "LastBlockHeight", cs.state.LastBlockHeight)
 		return false
 	}
 
@@ -1700,14 +1716,16 @@ func (cs *ConsensusState) canEnterCommit(height int64) bool {
 
 	rs := cs.GetRoundStateAtHeight(height)
 	if !rs.Votes.Precommits(rs.Round).HasTwoThirdsMajority() {
+		cs.Logger.Debug("Can't enter commit: not reached +2/3 majority")
 		return false
 	}
 
+	cs.Logger.Debug("Can enter commit: all conditions met")
 	return true
 }
 
 func (cs *ConsensusState) enterWaitToCommit(height int64, round int) {
-	cs.Logger.Debug("enterWaitToCommit:", "height", height, "round", round)
+	cs.Logger.Info("enterWaitToCommit:", "height", height, "round", round)
 	cs.updateRoundStep(height, round, cstypes.RoundStepWaitToCommit)
 	cs.newStep(height)
 }
