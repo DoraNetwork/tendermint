@@ -499,6 +499,9 @@ func (conR *ConsensusReactor) sendNewRoundStepMessages(peer p2p.Peer) {
 // If proposalBlockParts has header, send proposalCMPCTBlockParts
 func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs *cstypes.PeerRoundState,
 	peer p2p.Peer, ps *PeerState, logger log.Logger) bool {
+	rs.RWMtx.RLock()
+	defer rs.RWMtx.RUnlock()
+
 	// Send proposal Block parts?
 	if !compactBlock {
 		if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
@@ -538,6 +541,9 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 // Send Proposal && ProposalPOL BitArray?
 func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.PeerRoundState,
 	peer p2p.Peer, ps *PeerState, logger log.Logger) bool {
+	rs.RWMtx.RLock()
+	defer rs.RWMtx.RUnlock()
+
 	if rs.Proposal != nil && !prs.Proposal {
 		// Proposal: share the proposal metadata with peer.
 		{
@@ -568,6 +574,9 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 
 func (conR *ConsensusReactor) pushAncientProposalBlockParts(rs *cstypes.RoundState, prs *cstypes.PeerRoundState,
 	inPipeline bool, peer p2p.Peer, ps *PeerState, logger log.Logger) bool {
+	rs.RWMtx.RLock()
+	defer rs.RWMtx.RUnlock()
+
 	heightLogger := logger.With("height", prs.Height)
 	if inPipeline {
 		if prs.ProposalBlockParts == nil {
@@ -826,6 +835,8 @@ OUTER_LOOP:
 }
 
 func (conR *ConsensusReactor) gossipVotesForHeight(logger log.Logger, rs *cstypes.RoundState, prs *cstypes.PeerRoundState, ps *PeerState) bool {
+	rs.RWMtx.RLock()
+	defer rs.RWMtx.RUnlock()
 
 	// If there are lastCommits to send...
 	if prs.Step == cstypes.RoundStepNewHeight {
@@ -883,6 +894,7 @@ OUTER_LOOP:
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
+			rs.RWMtx.RLock()
 			if rs.Height == prs.Height {
 				if maj23, ok := rs.Votes.Prevotes(prs.Round).TwoThirdsMajority(); ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
@@ -894,12 +906,14 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
+			rs.RWMtx.RUnlock()
 		}
 
 		// Maybe send Height/Round/Precommits
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
+			rs.RWMtx.RLock()
 			if rs.Height == prs.Height {
 				if maj23, ok := rs.Votes.Precommits(prs.Round).TwoThirdsMajority(); ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
@@ -911,12 +925,14 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
+			rs.RWMtx.RUnlock()
 		}
 
 		// Maybe send Height/Round/ProposalPOL
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
+			rs.RWMtx.RLock()
 			if rs.Height == prs.Height && prs.ProposalPOLRound >= 0 {
 				if maj23, ok := rs.Votes.Prevotes(prs.ProposalPOLRound).TwoThirdsMajority(); ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
@@ -928,6 +944,7 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
+			rs.RWMtx.RUnlock()
 		}
 
 		// Little point sending LastCommitRound/LastCommit,

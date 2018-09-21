@@ -984,11 +984,13 @@ func (cs *ConsensusState) enterNewRound(height int64, round int) {
 		// and meanwhile we might have received a proposal
 		// for round 0.
 	} else {
+		rs.RWMtx.Lock()
 		rs.Proposal = nil
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = nil
 		rs.ProposalCMPCTBlock = nil
 		rs.ProposalCMPCTBlockParts = nil
+		rs.RWMtx.Unlock()
 	}
 	rs.Votes.SetRound(round + 1) // also track next round (round+1) to allow round-skipping
 

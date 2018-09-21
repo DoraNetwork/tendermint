@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"time"
+	"sync"
 
 	"github.com/tendermint/tendermint/types"
 )
@@ -90,6 +91,7 @@ type RoundState struct {
 	CommitRound             int            //
 	LastCommit              *types.VoteSet // Last precommits at Height-1
 	LastValidators          *types.ValidatorSet
+	RWMtx                   sync.RWMutex
 }
 
 // RoundStateEvent returns the H/R/S of the RoundState as an event.
