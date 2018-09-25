@@ -258,13 +258,13 @@ func (mem *Mempool) readOneTx() types.Tx {
 	f, err := os.Open("./replayOneData")
 	if err != nil {
 	}
-	_, err = f.Read(data)
+	size, err := f.Read(data)
 	if err != nil {
 	}
 	txHash := data[0:32]
-	tx := data[32:132]
+	tx := data[32:size]
 	fmt.Println("---------------------")
-	fmt.Println("hash", txHash, "tx", tx)
+	fmt.Println("total size", size, "hash", txHash, "tx", tx)
 	fmt.Println("---------------------")
 	replayHashTx[types.BytesToHash(txHash)] = tx[:]
 	if compactBlock {
