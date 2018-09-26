@@ -676,11 +676,11 @@ func (conR *ConsensusReactor) gossipPipelineDataForCatchup(rs *cstypes.RoundStat
 				Round:  prs.Round,
 				Part:   rs.ProposalCMPCTBlockParts.GetPart(index),
 			}
-			logger.Debug("Sending pipeline block part for catchup", "round", prs.Round, "index", index)
+			logger.Debug("Sending pipeline cmpct block part for catchup", "round", prs.Round, "index", index)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposalCMPCTBlockPart(prs.Height, prs.Round, index)
 			} else {
-				logger.Debug("Sending pipeline block part for catchup failed")
+				logger.Debug("Sending pipeline cmpct block part for catchup failed")
 			}
 		} else {
 			//logger.Info("No parts to send in catch-up, sleeping")

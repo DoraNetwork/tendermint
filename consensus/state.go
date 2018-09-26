@@ -1942,12 +1942,13 @@ func (cs *ConsensusState) updateLatestHeight(height int64) {
 // NOTE: block is not necessarily valid.
 // Asynchronously triggers either enterPrevote (before we timeout of propose) or tryFinalizeCommit, once we have the full block.
 func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
+	cs.mtx.Lock()
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
 	// }
 
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 
 	// We're not expecting a block part.
 	if rs.ProposalBlockParts == nil {
@@ -1956,6 +1957,10 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 	added, err = rs.ProposalBlockParts.AddPart(part, verify)
 	if err != nil {
 		return added, err
+	}
+	cs.mtx.Unlock()
+	if rs.ProposalBlockParts == nil {
+		return false, nil // TODO: bad peer? Return error?
 	}
 	if added && rs.ProposalBlockParts.IsComplete() {
 		// Added and completed!
@@ -1988,6 +1993,8 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 // NOTE: block is not necessarily valid.
 func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
+	cs.mtx.Lock()
+
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
@@ -1997,7 +2004,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	// if cs.ProposalBlockParts == nil || cs.ProposalCMPCTBlockParts == nil {
 	// 	return false, nil // TODO: bad peer? Return error?
 	// }
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	// added, err = cs.ProposalBlockParts.AddPart(part, verify)
 	// We're not expecting a block part.
 	if rs.ProposalCMPCTBlockParts == nil {
@@ -2006,6 +2013,10 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	added, err = rs.ProposalCMPCTBlockParts.AddPart(part, verify)
 	if err != nil {
 		return added, err
+	}
+	cs.mtx.Unlock()
+	if rs.ProposalCMPCTBlockParts == nil {
+		return false, nil // TODO: bad peer? Return error?
 	}
 	if added && rs.ProposalCMPCTBlockParts.IsComplete() {
 		types.RcreceiveBlock(height)
