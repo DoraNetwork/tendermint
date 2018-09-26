@@ -1040,6 +1040,16 @@ func (ps *PeerState) GetRoundStateAtHeight(height int64) *cstypes.PeerRoundState
 	return ps.getRoundStateAtHeight(height)
 }
 
+func (ps *PeerState) truncateRoundStates(height int64) {
+	maxLen := int64(8)
+
+	for h, prs := range ps.roundStates {
+		if height - prs.Height > maxLen {
+			delete(ps.roundStates, h)
+		}
+	}
+}
+
 func (ps *PeerState) getRoundStateAtHeight(height int64) *cstypes.PeerRoundState {
 	if _, ok := ps.roundStates[height]; !ok {
 		ps.roundStates[height] = &cstypes.PeerRoundState{
@@ -1050,6 +1060,8 @@ func (ps *PeerState) getRoundStateAtHeight(height int64) *cstypes.PeerRoundState
 			CatchupCommitRound: -1,
 		}
 	}
+
+	ps.truncateRoundStates(height)
 
 	return ps.roundStates[height]
 }

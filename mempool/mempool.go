@@ -957,7 +957,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		mem.uncommittedPtxs[height] = txs
 	}
 
-	mem.pendingBlockTxs[height] = txsMap
+	if !replay_txs {
+		mem.pendingBlockTxs[height] = txsMap
+	}
 
 	// Set height
 	mem.height = height

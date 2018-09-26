@@ -1868,7 +1868,7 @@ func (cs *ConsensusState) truncateRoundStates() {
 	defer cs.mtx.Unlock()
 
 	currentHeight := cs.state.LastBlockHeight
-	maxLen := int64(100)
+	maxLen := int64(8)
 
 	for h, rs := range cs.roundStates {
 		if currentHeight - rs.Height > maxLen {
