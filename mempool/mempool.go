@@ -511,9 +511,6 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 //     It gets called from another goroutine.
 // CONTRACT: Either cb will get called, or err returned.
 func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, local bool, cb func(*abci.Response)) (err error) {
-	mem.proxyMtx.Lock()
-	defer mem.proxyMtx.Unlock()
-
 	// Note: If it is parallel tx, just PushBack to ptxs
 	if txType == types.ParallelTx {
 		memTx := &mempoolTx{
@@ -584,6 +581,8 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 
 // ABCI callback function
 func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
+	mem.proxyMtx.Lock()
+	defer mem.proxyMtx.Unlock()
 	if mem.recheckCursor == nil {
 		mem.resCbNormal(req, res)
 	} else {
@@ -592,6 +591,8 @@ func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
 }
 
 func (mem *Mempool) handleTxArrive(txHash []byte) {
+	mem.proxyMtx.Lock()
+	defer mem.proxyMtx.Unlock()
 	if (len(mem.fetchingTx) == 0 || txHash == nil) {
 		return
 	}
