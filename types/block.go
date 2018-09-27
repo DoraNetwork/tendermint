@@ -25,13 +25,14 @@ type Block struct {
 
 // MakeBlock returns a new block with an empty header, except what can be computed from itself.
 // It populates the same set of fields validated by ValidateBasic
-func MakeBlock(height int64, txs []Tx, commit *Commit) *Block {
+func MakeBlock(height int64, txs []Tx, commit *Commit, evidence []Evidence) *Block {
 	block := &Block{
 		Header: &Header{
 			Height: height,
 			Time:   time.Now(),
 			NumTxs: int64(len(txs)),
 		},
+		Evidence:   EvidenceData{Evidence: evidence},
 		LastCommit: commit,
 		Data: &Data{
 			Txs: txs,

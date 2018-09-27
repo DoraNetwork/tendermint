@@ -1271,19 +1271,16 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 	if (height > 4) {
 		rsB4 = cs.GetRoundStateAtHeight(height - 4).state
 	}
+	evidence := cs.evpool.PendingEvidence()
 	if (compactBlock) {
 		txsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txsHash, commit)
-		evidence := cs.evpool.PendingEvidence()
-		cmpctBlock.AddEvidence(evidence)
+		cmpctBlock, cmpctBlockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txsHash, commit, evidence)
 		block = cmpctBlock
 		blockParts = cmpctBlockParts
 		return block, blockParts, cmpctBlock, cmpctBlockParts
 	} else {
 		txs := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
-		block, blockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txs, commit)
-		evidence := cs.evpool.PendingEvidence()
-		block.AddEvidence(evidence)
+		block, blockParts := cs.state.MakeBlockForProposer(rsB4, cs.privValidator, rs.Height, txs, commit, evidence)
 		cmpctBlock = block
 		cmpctBlockParts = blockParts
 		return block, blockParts, cmpctBlock, cmpctBlockParts

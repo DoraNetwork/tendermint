@@ -105,9 +105,10 @@ func (s State) GetValidators() (last *types.ValidatorSet, current *types.Validat
 // Create a block from the latest state
 
 // MakeBlock builds a block with the given txs and commit from the current state.
-func (s State) MakeBlockForProposer(csState State, proposer types.PrivValidator, height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
+func (s State) MakeBlockForProposer(csState State, proposer types.PrivValidator, height int64, 
+	txs []types.Tx, commit *types.Commit, evidence []types.Evidence) (*types.Block, *types.PartSet) {
 	// build base block
-	block := types.MakeBlock(height, txs, commit)
+	block := types.MakeBlock(height, txs, commit, evidence)
 
 	// fill header with state data
 	block.ChainID = csState.ChainID
@@ -134,8 +135,8 @@ func (s State) MakeBlockForProposer(csState State, proposer types.PrivValidator,
 	return block, block.MakePartSet(s.ConsensusParams.BlockGossip.BlockPartSizeBytes)
 }
 
-func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit) (*types.Block, *types.PartSet) {
-	return s.MakeBlockForProposer(s, nil, height, txs, commit)
+func (s State) MakeBlock(height int64, txs []types.Tx, commit *types.Commit,  evidence []types.Evidence) (*types.Block, *types.PartSet) {
+	return s.MakeBlockForProposer(s, nil, height, txs, commit, evidence)
 }
 
 //------------------------------------------------------------------------
