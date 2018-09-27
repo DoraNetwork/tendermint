@@ -2180,7 +2180,7 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 						// if we have all the votes now,
 						// go straight to new round (skip timeout commit)
 						// cs.scheduleTimeout(time.Duration(0), cs.Height, 0, cstypes.RoundStepNewHeight)
-						cs.enterNewRound(rs.Height, 0)
+						cs.enterNewRound(rs.Height+1, 0)
 					}
 
 				}
