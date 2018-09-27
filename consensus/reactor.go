@@ -306,7 +306,7 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 		}
 		switch msg := msg.(type) {
 		case *VoteMessage:
-			conR.Logger.Debug("Received VoteMessage", "msg", msg)
+			conR.Logger.Debug("Received VoteMessage", "peer", src.Key(), "msg", msg)
 			cs := conR.conS
 			height := msg.Vote.Height
 			valSize := cs.GetValidatorSize(height)
@@ -513,7 +513,7 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 		if rs.ProposalBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
 			if index, ok := rs.ProposalBlockParts.BitArray().Sub(prs.ProposalBlockParts.Copy()).PickRandom(); ok {
 				part := rs.ProposalBlockParts.GetPart(index)
-				logger.Debug("Sending block part", "height", rs.Height, "round", rs.Round)
+				logger.Debug("Sending block part", "peer", peer.Key(), "height", rs.Height, "round", rs.Round, "index", index)
 				msg := &BlockPartMessage{
 					Height: rs.Height, // This tells peer that this part applies to us.
 					Round:  rs.Round,  // This tells peer that this part applies to us.
@@ -528,7 +528,7 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 		if rs.ProposalCMPCTBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
 			if index, ok := rs.ProposalCMPCTBlockParts.BitArray().Sub(prs.ProposalCMPCTBlockParts.Copy()).PickRandom(); ok {
 				part := rs.ProposalCMPCTBlockParts.GetPart(index)
-				logger.Debug("Sending cmpct block part", "height", prs.Height, "round", prs.Round, "part", part)
+				logger.Debug("Sending cmpct block part", "peer", peer.Key(), "height", prs.Height, "round", prs.Round, "index", index)
 				msg := &CMPCTBlockPartMessage{
 					Height: rs.Height, // This tells peer that this part applies to us.
 					Round:  rs.Round,  // This tells peer that this part applies to us.
@@ -554,7 +554,7 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 		// Proposal: share the proposal metadata with peer.
 		{
 			msg := &ProposalMessage{Proposal: rs.Proposal}
-			logger.Debug("Sending proposal", "height", rs.Height, "round", rs.Round)
+			logger.Debug("Sending proposal", "peer", peer.Key(), "height", rs.Height, "round", rs.Round)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposal(rs.Proposal)
 			}
@@ -569,7 +569,7 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 				ProposalPOLRound: rs.Proposal.POLRound,
 				ProposalPOL:      rs.Votes.Prevotes(rs.Proposal.POLRound).BitArray(),
 			}
-			logger.Debug("Sending POL", "height", rs.Height, "round", rs.Round)
+			logger.Debug("Sending POL", "peer", peer.Key(), "height", rs.Height, "round", rs.Round)
 			peer.Send(DataChannel, struct{ ConsensusMessage }{msg})
 		}
 		return true
@@ -664,7 +664,7 @@ func (conR *ConsensusReactor) gossipPipelineDataForCatchup(rs *cstypes.RoundStat
 				Round:  prs.Round,
 				Part:   rs.ProposalBlockParts.GetPart(index),
 			}
-			logger.Debug("Sending pipeline block part for catchup", "round", prs.Round, "index", index)
+			logger.Debug("Sending pipeline block part for catchup", "peer", peer.Key(), "height", prs.Height, "round", prs.Round, "index", index)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
 			} else {
@@ -683,7 +683,7 @@ func (conR *ConsensusReactor) gossipPipelineDataForCatchup(rs *cstypes.RoundStat
 				Round:  prs.Round,
 				Part:   part,
 			}
-			logger.Debug("Sending pipeline cmpct block part for catchup", "round", prs.Round, "index", index, "part", part)
+			logger.Debug("Sending pipeline cmpct block part for catchup", "peer", peer.Key(), "height", prs.Height, "round", prs.Round, "index", index)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposalCMPCTBlockPart(prs.Height, prs.Round, index)
 			} else {
@@ -727,7 +727,7 @@ func (conR *ConsensusReactor) gossipDataForCatchup(logger log.Logger, rs *cstype
 			Round:  prs.Round,  // Not our height, so it doesn't matter.
 			Part:   part,
 		}
-		logger.Debug("Sending block part for catchup", "round", prs.Round, "index", index)
+		logger.Debug("Sending block part for catchup", "peer", peer.Key(), "height", prs.Height, "round", prs.Round, "index", index)
 		if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 			ps.SetHasProposalBlockPart(prs.Height, prs.Round, index)
 		} else {
@@ -1386,11 +1386,13 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 		// update both height and round
 		ps.latestHeight = msg.Height
 		ps.latestRound = msg.Round
+		ps.logger.Debug("rollback peer height", "peer", ps.Peer.Key(), "height", msg.Height, "round", msg.Round)
 	} else if msg.Step >= cstypes.RoundStepPrevote {
 		// update latest block height if peer has entered prevote
 		if msg.Height > ps.latestHeight {
 			ps.latestHeight = msg.Height
 			ps.latestRound = msg.Round
+			ps.logger.Debug("update peer height", "peer", ps.Peer.Key(), "height", msg.Height, "round", msg.Round)
 		}
 	}
 }

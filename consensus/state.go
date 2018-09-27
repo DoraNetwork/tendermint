@@ -882,7 +882,7 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		cs.Logger.Info("Build proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 		cs.updateMemPool(height, rs)
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
-		cs.updateLatestHeight(height)
+		cs.updateLatestHeight(height, rs.Round)
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
@@ -1343,7 +1343,7 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 	// Sign and broadcast vote as necessary
 	if canMoveForward {
 		cs.doPrevote(height, round)
-		cs.updateLatestHeight(height)
+		cs.updateLatestHeight(height, round)
 	} else {
 		// enter wait-to-prevote step, woken up when previous height enters precommit
 		cs.enterWaitToPrevote(height, round)
@@ -1928,11 +1928,12 @@ func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 }
 
 // Update latest block height
-func (cs *ConsensusState) updateLatestHeight(height int64) {
+func (cs *ConsensusState) updateLatestHeight(height int64, round int) {
 	if height > cs.latestHeight {
 		rs := cs.GetRoundStateAtHeight(height)
 		if rs.Proposal !=  nil {
 			cs.latestHeight = height
+			cs.Logger.Debug("update self height", "height", height, "round", round)
 		}
 	}
 }
@@ -1970,11 +1971,11 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		rs.ProposalBlock = wire.ReadBinary(&types.Block{}, rs.ProposalBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		// NOTE: it's possible to receive complete proposal blocks for future rounds without having the proposal
-		cs.Logger.Info("Received complete proposal block", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
+		cs.Logger.Info("Received complete proposal block", "height", rs.ProposalBlock.Height, "round", rs.Round, "hash", rs.ProposalBlock.Hash())
 
 		cs.updateMemPool(height, rs)
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
-		cs.updateLatestHeight(height)
+		cs.updateLatestHeight(height, rs.Round)
 
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
@@ -2028,7 +2029,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// TODO: proposal block and proposal cmpct block parts need rebuild
 		rs.ProposalCMPCTBlock = wire.ReadBinary(&types.Block{}, rs.ProposalCMPCTBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
-		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "hash", rs.ProposalCMPCTBlock.Hash())
+		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash())
 		cs.cmpctBlockHeight = height
 		types.RcCMPCTBlock(height, rs.ProposalCMPCTBlock, rs.ProposalCMPCTBlockParts)
 		// assign cmpctblock to block directly
@@ -2060,7 +2061,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 				cs.updateMemPool(height, rs)
 				types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
-				cs.updateLatestHeight(height)
+				cs.updateLatestHeight(height, rs.Round)
 				if cs.isProposalComplete(height) &&
 					(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 					// Move onto the next step
