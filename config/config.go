@@ -279,7 +279,7 @@ func DefaultMempoolConfig() *MempoolConfig {
 		Recheck:      true,
 		RecheckEmpty: true,
 		Broadcast:    true,
-		WalPath:      "data/mempool.wal",
+		WalPath:      "",
 	}
 }
 
