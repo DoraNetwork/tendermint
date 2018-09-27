@@ -579,7 +579,7 @@ func (conR *ConsensusReactor) pushAncientProposalBlockParts(rs *cstypes.RoundSta
 
 	heightLogger := logger.With("height", prs.Height)
 	if inPipeline {
-		if prs.ProposalBlockParts == nil {
+		if prs.ProposalBlockParts == nil && rs.Proposal != nil {
 			ps.InitProposalBlockParts(prs.Height, rs.Proposal.BlockPartsHeader)
 			// continue the loop since prs is a copy and not effected by this initialization
 			return true
