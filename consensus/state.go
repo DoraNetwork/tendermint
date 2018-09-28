@@ -249,6 +249,7 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
+	cs.Logger.Info("resetRoundState")
 	cs.latestHeight = height
 	for h := range cs.roundStates {
 		if h > height {
@@ -2177,6 +2178,7 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 			if ok {
 				if len(blockID.Hash) == 0 {
 					// reset pbft pipeline
+					cs.Logger.Info("precommit +2/3 nil")
 					cs.resetRoundState(height, vote.Round)
 					cs.startNewRound(height, vote.Round)
 				} else {

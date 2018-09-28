@@ -522,7 +522,7 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 		if rs.ProposalCMPCTBlockParts.HasHeader(prs.ProposalBlockPartsHeader) {
 			if index, ok := rs.ProposalCMPCTBlockParts.BitArray().Sub(prs.ProposalCMPCTBlockParts.Copy()).PickRandom(); ok {
 				part := rs.ProposalCMPCTBlockParts.GetPart(index)
-				logger.Debug("Sending cmpct block part", "height", prs.Height, "round", prs.Round)
+				logger.Debug("Sending cmpct block part", "height", prs.Height, "round", prs.Round, "part", part)
 				msg := &CMPCTBlockPartMessage{
 					Height: rs.Height, // This tells peer that this part applies to us.
 					Round:  rs.Round,  // This tells peer that this part applies to us.
@@ -669,14 +669,15 @@ func (conR *ConsensusReactor) gossipPipelineDataForCatchup(rs *cstypes.RoundStat
 			time.Sleep(conR.conS.config.PeerGossipSleep())
 		}
 	} else {
-		if index, ok := prs.ProposalCMPCTBlockParts.Not().PickRandom(); ok {
+		if index, ok := rs.ProposalCMPCTBlockParts.BitArray().Sub(prs.ProposalCMPCTBlockParts.Copy()).PickRandom(); ok {
+			part := rs.ProposalCMPCTBlockParts.GetPart(index)
 			// Send the part
 			msg := &CMPCTBlockPartMessage{
 				Height: prs.Height,
 				Round:  prs.Round,
-				Part:   rs.ProposalCMPCTBlockParts.GetPart(index),
+				Part:   part,
 			}
-			logger.Debug("Sending pipeline cmpct block part for catchup", "round", prs.Round, "index", index)
+			logger.Debug("Sending pipeline cmpct block part for catchup", "round", prs.Round, "index", index, "part", part)
 			if peer.Send(DataChannel, struct{ ConsensusMessage }{msg}) {
 				ps.SetHasProposalCMPCTBlockPart(prs.Height, prs.Round, index)
 			} else {
