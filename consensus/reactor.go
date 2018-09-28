@@ -256,6 +256,12 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 				conR.Logger.Error("Bad VoteSetBitsMessage field Type")
 				return
 			}
+
+			if ourVotes == nil {
+				// Rollback may have happened so related round state has been reseted
+				conR.Logger.Debug("Unable to find local votes", "height", msg.Height, "round", msg.Round)
+				return
+			}
 			src.TrySend(VoteSetBitsChannel, struct{ ConsensusMessage }{&VoteSetBitsMessage{
 				Height:  msg.Height,
 				Round:   msg.Round,
