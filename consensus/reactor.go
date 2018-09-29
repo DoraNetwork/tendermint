@@ -1193,11 +1193,13 @@ func (ps *PeerState) getVoteBitArray(height int64, round int, type_ byte) *cmn.B
 	}
 
 	prs := ps.getRoundStateAtHeight(height)
-	switch type_ {
-	case types.VoteTypePrevote:
-		return prs.Prevotes
-	case types.VoteTypePrecommit:
-		return prs.Precommits
+	if prs.Round == round {
+		switch type_ {
+		case types.VoteTypePrevote:
+			return prs.Prevotes
+		case types.VoteTypePrecommit:
+			return prs.Precommits
+		}
 	}
 
 	// if ps.Height == height {
