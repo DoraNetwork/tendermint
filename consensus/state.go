@@ -1088,7 +1088,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 	}
 
 	if !cs.isProposer(height) {
-		cs.Logger.Info("enterPropose: Not our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
+		cs.Logger.Info("enterPropose: Not our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator, "height", height, "round", round)
 		if rs.Validators.HasAddress(cs.privValidator.GetAddress()) {
 			cs.Logger.Debug("This node is a validator")
 		} else {
@@ -1102,7 +1102,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 			cs.enterWaitToPropose(height, round)
 		}
 	} else {
-		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator)
+		cs.Logger.Info("enterPropose: Our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator, "height", height, "round", round)
 		cs.Logger.Debug("This node is a validator")
 		if canMoveForward {
 			// If we don't get the proposal and all block parts quick enough, enterPrevote
@@ -2106,7 +2106,7 @@ func (cs *ConsensusState) tryAddVote(vote *types.Vote, peerKey string) error {
 //-----------------------------------------------------------------------------
 
 func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool, err error) {
-	cs.Logger.Debug("addVote", "voteHeight", vote.Height, "voteType", vote.Type, "valIndex", vote.ValidatorIndex)
+	cs.Logger.Debug("addVote", "voteHeight", vote.Height, "voteRound", vote.Round, "voteType", vote.Type, "valIndex", vote.ValidatorIndex)
 
 	rs := cs.GetRoundStateAtHeight(vote.Height)
 	// TODO: should consider below scenario?
