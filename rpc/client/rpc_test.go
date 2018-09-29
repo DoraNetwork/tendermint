@@ -225,7 +225,7 @@ func TestBroadcastTxSync(t *testing.T) {
 
 	for i, c := range GetClients() {
 		_, _, tx := MakeTxKV()
-		bres, err := c.BroadcastTxSync(tx)
+		bres, err := c.BroadcastTxSync(tx, types.RawTx)
 		require.Nil(err, "%d: %+v", i, err)
 		require.Equal(bres.Code, abci.CodeTypeOK) // FIXME
 

@@ -121,7 +121,7 @@ func TestTxEventsSentWithBroadcastTxSync(t *testing.T) {
 		evtTyp := types.EventTx
 
 		// send sync
-		txres, err := c.BroadcastTxSync(tx)
+		txres, err := c.BroadcastTxSync(tx, types.RawTx)
 		require.Nil(err, "%+v", err)
 		require.Equal(txres.Code, abci.CodeTypeOK) // FIXME
 

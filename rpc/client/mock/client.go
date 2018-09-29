@@ -99,8 +99,8 @@ func (c Client) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error)
 	return core.BroadcastTxAsync(tx)
 }
 
-func (c Client) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	return core.BroadcastTxSync(tx)
+func (c Client) BroadcastTxSync(tx types.Tx, txType int32) (*ctypes.ResultBroadcastTx, error) {
+	return core.BroadcastTxSync(tx, txType)
 }
 
 func (c Client) NetInfo() (*ctypes.ResultNetInfo, error) {

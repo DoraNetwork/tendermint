@@ -37,7 +37,7 @@ func (a ABCIApp) ABCIQueryWithOptions(path string, data data.Bytes, opts client.
 
 func (a ABCIApp) BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit, error) {
 	res := ctypes.ResultBroadcastTxCommit{}
-	res.CheckTx = a.App.CheckTx(tx)
+	res.CheckTx = a.App.CheckTx(tx, false)
 	if res.CheckTx.IsErr() {
 		return &res, nil
 	}
@@ -46,7 +46,7 @@ func (a ABCIApp) BroadcastTxCommit(tx types.Tx) (*ctypes.ResultBroadcastTxCommit
 }
 
 func (a ABCIApp) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	c := a.App.CheckTx(tx)
+	c := a.App.CheckTx(tx, false)
 	// and this gets written in a background thread...
 	if !c.IsErr() {
 		go func() { a.App.DeliverTx(tx) }() // nolint: errcheck
@@ -54,8 +54,8 @@ func (a ABCIApp) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, error
 	return &ctypes.ResultBroadcastTx{c.Code, c.Data, c.Log, tx.Hash()}, nil
 }
 
-func (a ABCIApp) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	c := a.App.CheckTx(tx)
+func (a ABCIApp) BroadcastTxSync(tx types.Tx, txType int32) (*ctypes.ResultBroadcastTx, error) {
+	c := a.App.CheckTx(tx, false)
 	// and this gets written in a background thread...
 	if !c.IsErr() {
 		go func() { a.App.DeliverTx(tx) }() // nolint: errcheck
@@ -110,7 +110,7 @@ func (m ABCIMock) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx, erro
 	return res.(*ctypes.ResultBroadcastTx), nil
 }
 
-func (m ABCIMock) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
+func (m ABCIMock) BroadcastTxSync(tx types.Tx, txType int32) (*ctypes.ResultBroadcastTx, error) {
 	res, err := m.Broadcast.GetResponse(tx)
 	if err != nil {
 		return nil, err
@@ -190,8 +190,8 @@ func (r *ABCIRecorder) BroadcastTxAsync(tx types.Tx) (*ctypes.ResultBroadcastTx,
 	return res, err
 }
 
-func (r *ABCIRecorder) BroadcastTxSync(tx types.Tx) (*ctypes.ResultBroadcastTx, error) {
-	res, err := r.Client.BroadcastTxSync(tx, types.RawTx)
+func (r *ABCIRecorder) BroadcastTxSync(tx types.Tx, txType int32) (*ctypes.ResultBroadcastTx, error) {
+	res, err := r.Client.BroadcastTxSync(tx, txType)
 	r.addCall(Call{
 		Name:     "broadcast_tx_sync",
 		Args:     tx,
