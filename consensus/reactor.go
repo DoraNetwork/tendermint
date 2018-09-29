@@ -901,9 +901,11 @@ OUTER_LOOP:
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
-			rs.RWMtx.RLock()
 			if rs.Height == prs.Height {
-				if maj23, ok := rs.Votes.Prevotes(prs.Round).TwoThirdsMajority(); ok {
+				rs.RWMtx.RLock()
+				maj23, ok := rs.Votes.Prevotes(prs.Round).TwoThirdsMajority()
+				rs.RWMtx.RUnlock()
+				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
 						Round:   prs.Round,
@@ -913,16 +915,17 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
-			rs.RWMtx.RUnlock()
 		}
 
 		// Maybe send Height/Round/Precommits
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
-			rs.RWMtx.RLock()
 			if rs.Height == prs.Height {
-				if maj23, ok := rs.Votes.Precommits(prs.Round).TwoThirdsMajority(); ok {
+				rs.RWMtx.RLock()
+				maj23, ok := rs.Votes.Precommits(prs.Round).TwoThirdsMajority()
+				rs.RWMtx.RUnlock()
+				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
 						Round:   prs.Round,
@@ -932,16 +935,17 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
-			rs.RWMtx.RUnlock()
 		}
 
 		// Maybe send Height/Round/ProposalPOL
 		{
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
-			rs.RWMtx.RLock()
 			if rs.Height == prs.Height && prs.ProposalPOLRound >= 0 {
-				if maj23, ok := rs.Votes.Prevotes(prs.ProposalPOLRound).TwoThirdsMajority(); ok {
+				rs.RWMtx.RLock()
+				maj23, ok := rs.Votes.Prevotes(prs.ProposalPOLRound).TwoThirdsMajority()
+				rs.RWMtx.RUnlock()
+				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
 						Round:   prs.ProposalPOLRound,
@@ -951,7 +955,6 @@ OUTER_LOOP:
 					time.Sleep(conR.conS.config.PeerQueryMaj23Sleep())
 				}
 			}
-			rs.RWMtx.RUnlock()
 		}
 
 		// Little point sending LastCommitRound/LastCommit,
