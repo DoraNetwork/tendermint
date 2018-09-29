@@ -1950,10 +1950,12 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 	// We're not expecting a block part.
 	if rs.ProposalBlockParts == nil {
+		cs.mtx.Unlock()
 		return false, nil // TODO: bad peer? Return error?
 	}
 	added, err = rs.ProposalBlockParts.AddPart(part, verify)
 	if err != nil {
+		cs.mtx.Unlock()
 		return added, err
 	}
 	cs.mtx.Unlock()
@@ -2006,10 +2008,12 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	// added, err = cs.ProposalBlockParts.AddPart(part, verify)
 	// We're not expecting a block part.
 	if rs.ProposalCMPCTBlockParts == nil {
+		cs.mtx.Unlock()
 		return false, nil // TODO: bad peer? Return error?
 	}
 	added, err = rs.ProposalCMPCTBlockParts.AddPart(part, verify)
 	if err != nil {
+		cs.mtx.Unlock()
 		return added, err
 	}
 	cs.mtx.Unlock()
