@@ -1087,7 +1087,7 @@ func (cs *ConsensusState) enterPropose(height int64, round int) {
 		return
 	}
 
-	if !cs.isProposer(height) {
+	if !cs.isProposer(height, round) {
 		cs.Logger.Info("enterPropose: Not our turn to propose", "proposer", rs.Validators.GetProposer().Address, "privValidator", cs.privValidator, "height", height, "round", round)
 		if rs.Validators.HasAddress(cs.privValidator.GetAddress()) {
 			cs.Logger.Debug("This node is a validator")
@@ -1154,7 +1154,7 @@ func (cs *ConsensusState) enterWaitToPropose(height int64, round int) {
 	cs.newStep(height)
 }
 
-func (cs *ConsensusState) isProposer(height int64) bool {
+func (cs *ConsensusState) isProposer(height int64, round int) bool {
 	rsValidators := cs.state.Validators
 	// Use height-4 validators
 	if height <= 4 {
@@ -1162,11 +1162,12 @@ func (cs *ConsensusState) isProposer(height int64) bool {
 	} else {
 		rsValidators = cs.GetRoundStateAtHeight(height-4).state.Validators
 	}
-	return bytes.Equal(rsValidators.GetProposerAtHeight(height).Address, cs.privValidator.GetAddress())
+	return bytes.Equal(rsValidators.GetProposerAtHeight(height, round).Address, cs.privValidator.GetAddress())
 }
 
+// TODO: not use now and result maybe not correct
 func (cs *ConsensusState) CheckIsProposer(height int64) bool {
-	return cs.isProposer(height)
+	return cs.isProposer(height, 0)
 }
 
 func (cs *ConsensusState) GetPrivAddress() data.Bytes {
@@ -1906,7 +1907,7 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 		rsB4Validators = cs.GetRoundStateAtHeight(proposal.Height - 4).Validators
 	}
 	// Verify signature
-	if !rsB4Validators.GetProposerAtHeight(proposal.Height).PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
+	if !rsB4Validators.GetProposerAtHeight(proposal.Height, proposal.Round).PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
 		return ErrInvalidProposalSignature
 	}
 

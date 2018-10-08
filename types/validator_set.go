@@ -136,13 +136,13 @@ func (valSet *ValidatorSet) GetProposer() (proposer *Validator) {
 }
 
 // check if its proposer for height
-func (valSet *ValidatorSet) GetProposerAtHeight(height int64) (proposer *Validator) {
+func (valSet *ValidatorSet) GetProposerAtHeight(height int64, round int) (proposer *Validator) {
 	if len(valSet.Validators) == 0 {
 		return nil
 	}
-	if height > (valSet.Height + 1) {
+	if (height + int64(round)) > (valSet.Height + 1) {
 		tmpValSet := valSet.Copy()
-		tmpValSet.IncrementAccum(int(height - (valSet.Height + 1)))
+		tmpValSet.IncrementAccum(int(height + int64(round) - (valSet.Height + 1)))
 		if tmpValSet.Proposer == nil {
 			tmpValSet.Proposer = tmpValSet.findProposer()
 		}
