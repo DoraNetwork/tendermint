@@ -891,6 +891,11 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		} else if rs.Step == cstypes.RoundStepCommit {
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+			// Trigger next height to enter propose step
+			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+		} else if cs.isProposalComplete(height) {
+			// Trigger next height to enter propose step
+			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
 		}
 	}
 }
@@ -931,18 +936,31 @@ func (cs* ConsensusState) notifyStateTransition(height int64, typ cstypes.RoundS
 
 func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundStepType) error {
 	rs := cs.GetRoundStateAtHeight(height + 1)
-
-	switch typ {
-	case cstypes.RoundStepPrevote:
-		cs.enterPropose(rs.Height, rs.Round)
-	case cstypes.RoundStepPrecommit:
-		cs.enterPrevote(rs.Height, rs.Round)
-	case cstypes.RoundStepCommit:
-		cs.enterPrecommit(rs.Height, rs.Round)
-	default:
-		return ErrInvalidStateTransition
+	if typ == cstypes.RoundStepCommit {
+		if rs.Step <= cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+			cs.enterPrevote(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToPrecommit {
+			cs.enterPrecommit(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToCommit {
+			cs.enterCommit(rs.Height, rs.Round)
+		}
+	} else if typ == cstypes.RoundStepPrecommit {
+		if rs.Step <= cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+			cs.enterPrevote(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToPrecommit {
+			cs.enterPrecommit(rs.Height, rs.Round)
+		}
+	} else if typ == cstypes.RoundStepPrevote {
+		if rs.Step <= cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(rs.Height, rs.Round)
+		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+			cs.enterPrevote(rs.Height, rs.Round)
+		}
 	}
-
 	return nil
 }
 
@@ -1987,7 +2005,10 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(height)
 			// Trigger next height to enter propose step
-			cs.notifyStateTransition(height, cstypes.RoundStepPrevote)
+			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+		} else if cs.isProposalComplete(height) {
+			// Trigger next height to enter propose step
+			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
 		}
 		return true, err
 	}
@@ -2071,6 +2092,11 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				} else if rs.Step == cstypes.RoundStepCommit {
 					// If we're waiting on the proposal block...
 					cs.tryFinalizeCommit(height)
+					// Trigger next height to enter propose step
+					cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+				} else if cs.isProposalComplete(height) {
+					// Trigger next height to enter propose step
+					cs.notifyStateTransition(height, cstypes.RoundStepPropose)
 				}
 			}
 		}
