@@ -99,6 +99,8 @@ type ConsensusState struct {
 
 	// internal state
 	mtx sync.Mutex
+	precommitMtx sync.Mutex
+	commitMtx sync.Mutex
 	roundStates map[int64]*RoundStateWrapper
 	state sm.State // State until height-1.
 
@@ -1470,6 +1472,8 @@ func (cs *ConsensusState) enterPrevoteWait(height int64, round int) {
 // else, unlock an existing lock and precommit nil if +2/3 of prevotes were nil,
 // else, precommit nil otherwise.
 func (cs *ConsensusState) enterPrecommit(height int64, round int) {
+	cs.precommitMtx.Lock()
+	defer cs.precommitMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit == rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
@@ -1653,6 +1657,8 @@ func (cs *ConsensusState) enterPrecommitWait(height int64, round int) {
 
 // Enter: +2/3 precommits for block
 func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
+	cs.commitMtx.Lock()
+	defer cs.commitMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if cstypes.RoundStepCommit <= rs.Step {
 		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
