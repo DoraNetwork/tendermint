@@ -130,6 +130,9 @@ type ConsensusState struct {
 	// max height of ever received blocks
 	latestHeight int64
 
+	// max height of ever received votes
+	latestVoteHeight int64
+
 	// some functions can be overwritten for testing
 	decideProposal func(height int64, round int)
 	doPrevote      func(height int64, round int)
@@ -255,6 +258,7 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	defer cs.mtx.Unlock()
 	cs.Logger.Info("resetRoundState")
 	cs.latestHeight = height
+	cs.latestVoteHeight = cs.latestHeight
 	for h := range cs.roundStates {
 		if h > height {
 			cs.roundStates[h].timeoutTicker.Stop()
@@ -417,6 +421,7 @@ func (cs *ConsensusState) OnStart() error {
 	// schedule the first 4 rounds!
 	// use GetRoundState so we don't race the receiveRoutine for access
 	cs.latestHeight = cs.state.LastBlockHeight
+	cs.latestVoteHeight = cs.latestHeight
 	initialHeight = cs.state.LastBlockHeight + 1
 	loadStateFromStore = true
 	for i := 0; i <= 3; i++ {
@@ -824,31 +829,29 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 
 	cs.setStepTimeout(ti.Height, ti.Step)
 
-	if ti.Step < rs.Step {
-		// enter propose directly if already in WaitToPropose state
-		if ti.Step == cstypes.RoundStepNewHeight && rs.Step == cstypes.RoundStepWaitToPropose {
-			cs.enterPropose(ti.Height, 0)
-		} else {
-			cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round, "step", rs.Step)
-		}
-
-		return
-	}
-
 	// the timeout will now cause a state transition
 	switch ti.Step {
 	case cstypes.RoundStepNewHeight:
 		// NewRound event fired from enterNewRound.
 		// XXX: should we fire timeout here (for timeout commit)?
 		cs.enterNewRound(ti.Height, 0)
+		if rs.Step == cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(ti.Height, rs.Round)
+		}
 	case cstypes.RoundStepNewRound:
 		cs.enterPropose(ti.Height, 0)
 	case cstypes.RoundStepPropose:
 		cs.eventBus.PublishEventTimeoutPropose(cs.RoundStateEvent(ti.Height))
 		cs.enterPrevote(ti.Height, ti.Round)
+		if rs.Step == cstypes.RoundStepWaitToPrevote {
+			cs.enterPrevote(ti.Height, rs.Round)
+		}
 	case cstypes.RoundStepPrevoteWait:
 		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
 		cs.enterPrecommit(ti.Height, ti.Round)
+		if rs.Step == cstypes.RoundStepWaitToPrecommit {
+			cs.enterPrecommit(ti.Height, rs.Round)
+		}
 	case cstypes.RoundStepPrecommitWait:
 		// rollback the pipeline
 		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
@@ -2242,6 +2245,11 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 			}
 		default:
 			cmn.PanicSanity(cmn.Fmt("Unexpected vote type %X", vote.Type)) // Should not happen.
+		}
+
+		// update latest vote height if necessary
+		if height > cs.latestVoteHeight {
+			cs.latestVoteHeight = height
 		}
 	}
 

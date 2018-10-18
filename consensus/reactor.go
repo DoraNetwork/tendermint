@@ -783,6 +783,18 @@ OUTER_LOOP:
 					continue OUTER_LOOP
 				}
 			}
+
+			// If votes were received before receiving complete block,
+			// gossip height+1 votes to peer to move forward
+			if conR.conS.latestVoteHeight > rs.Height {
+				h := rs.Height + 1
+				heightLogger := logger.With("height", h)
+				selfRs := conR.conS.GetRoundStateAtHeight(h)
+				peerRs := ps.GetRoundStateAtHeight(h)
+				if conR.gossipVotesForHeight(heightLogger, &selfRs.RoundState, peerRs, ps) {
+					continue OUTER_LOOP
+				}
+			}
 		}
 
 		// If height matches, then send LastCommit, Prevotes, Precommits.
