@@ -235,7 +235,9 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 	if _, ok := cs.roundStates[height]; ok {
+		lastValidators := cs.roundStates[height].Validators.Copy()
 		cs.roundStates[height].state = cs.state.Copy()
+		cs.roundStates[height].state.LastValidators = lastValidators
 		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
 	}
 }
