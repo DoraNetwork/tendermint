@@ -798,11 +798,16 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		if compactBlock {
 			removedTxsHash := make([]*mempoolTx, 0, mem.txsHash.Len())
 			for _, txHash := range txs {
-				txHashMaptx := mem.txsHashMap[types.BytesToHash(txHash)]
+				if (len(txHash) != 32) {
+					return fmt.Errorf("ERROR: txHash %s is not a hash string", txHash)
+				}
+				
+				txHashValue := types.BytesToHash(txHash)
+				txHashMaptx := mem.txsHashMap[txHashValue]
 				if (txHashMaptx != nil) {
 					txsMap[string(txHashMaptx)] = struct{}{}
-					delete(mem.txsHashMap, types.BytesToHash(txHash))
-					mem.uncommittedTxsHashMap[types.BytesToHash(txHash)] = txHashMaptx
+					delete(mem.txsHashMap, txHashValue)
+					mem.uncommittedTxsHashMap[txHashValue] = txHashMaptx
 				} else {
 					if !replay_txs {
 						mem.logger.Error("Update mempool can not find tx", txHash)
@@ -811,7 +816,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				// remove from txHash
 				for e := mem.txsHash.Front(); e != nil; e = e.Next() {
 					memTx := e.Value.(*mempoolTx)
-					if types.BytesToHash(txHash) == types.BytesToHash(memTx.tx) {
+					if bytes.Compare(txHash, memTx.tx) == 0 {
 						mem.txsHash.Remove(e)
 						e.DetachPrev()
 					}
