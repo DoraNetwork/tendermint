@@ -354,6 +354,9 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 				return false, replayHashTx[types.BytesToHash(hash)]
 			}
 		}
+		mem.wal.Write([]byte(fmt.Sprintf("Get Tx{%X}\n", hash)))
+		mem.wal.Sync()
+
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
 			return false, tx
@@ -452,17 +455,17 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 	// END CACHE
 
 	// WAL
-	if mem.wal != nil {
-		// TODO: Notify administrators when WAL fails
-		_, err := mem.wal.Write([]byte(tx))
-		if err != nil {
-			mem.logger.Error("Error writing to WAL", "err", err)
-		}
-		_, err = mem.wal.Write([]byte("\n"))
-		if err != nil {
-			mem.logger.Error("Error writing to WAL", "err", err)
-		}
-	}
+	// if mem.wal != nil {
+	// 	// TODO: Notify administrators when WAL fails
+	// 	_, err := mem.wal.Write([]byte(tx))
+	// 	if err != nil {
+	// 		mem.logger.Error("Error writing to WAL", "err", err)
+	// 	}
+	// 	_, err = mem.wal.Write([]byte("\n"))
+	// 	if err != nil {
+	// 		mem.logger.Error("Error writing to WAL", "err", err)
+	// 	}
+	// }
 	// END WAL
 
 	// NOTE: proxyAppConn may error if tx buffer is full
@@ -535,7 +538,9 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				// f.Sync()
 				mem.txs.PushBack(memTx)
 				if (disablePtx || usePtxHash) {
-					mem.txsHashMap[types.BytesToHash(r.CheckTx.Data)] = tx
+					hashValue := types.BytesToHash(r.CheckTx.Data)
+					mem.wal.Write([]byte(fmt.Sprintf("Add Tx{%X}\n", hashValue)))
+					mem.txsHashMap[hashValue] = tx
 				}
 				if disablePtx && compactBlock {
 					memTxHash := &mempoolTx{
@@ -752,9 +757,11 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				for _, memTx := range mem.uncommittedTxsHash[height] {
 					hashValue := types.BytesToHash(memTx.tx)
 					if  mem.txsHashMap[hashValue] != nil {
+						mem.wal.Write([]byte(fmt.Sprintf("Del Tx{%X}\n", hashValue)))
 						delete(mem.txsHashMap, hashValue)
 					}
 				}
+				mem.wal.Sync()
 				delete(mem.uncommittedTxsHash, height)
 				delete(mem.uncommittedTxs, height)
 				delete(mem.pendingBlockTxs, height)
@@ -808,7 +815,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					txsMap[string(txHashMaptx)] = struct{}{}
 				} else {
 					if !replay_txs {
-						mem.logger.Error("Update mempool can not find", "Tx", fmt.Sprintf("{%X}", txHash))
+						errMsg := fmt.Sprintf("Update mempool can not find Tx{%X}", txHash)
+						mem.wal.Write([]byte(errMsg))
+						mem.logger.Error(errMsg)
 					}
 				}
 				// remove from txHash
@@ -842,7 +851,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				if (txHashMaptx != nil) {
 					txsMap[string(txHashMaptx)] = struct{}{}
 				} else {
-					mem.logger.Error("Update mempool can not find tx", txHash)
+					errMsg := fmt.Sprintf("Update mempool can not find Tx{%X}", txHash)
+					mem.wal.Write([]byte(errMsg))
+					mem.logger.Error(errMsg)
 				}
 			}
 		}
@@ -903,6 +914,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	mem.logger.Info("After Update() uncommitted ptxs size", len(mem.uncommittedPtxs))
 	mem.logger.Info("After Update() uncommitted ptxsHash size", len(mem.uncommittedPtxsHash))
 
+	mem.wal.Sync()
 	//mem.NotifiyFetchingTx()
 	return nil
 }
