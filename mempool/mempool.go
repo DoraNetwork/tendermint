@@ -114,7 +114,6 @@ type Mempool struct {
 	uncommittedTxsHash   map[int64]([]*mempoolTx)
 	uncommittedPtxs      map[int64](types.Txs)
 	uncommittedPtxsHash  map[int64](types.Txs)
-	uncommittedTxsHashMap map[types.TxHash]types.Tx
 
 	// Keep track of all transactions in pending blocks
 	pendingBlockTxs      map[int64]TxsMap
@@ -148,7 +147,6 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		uncommittedTxsHash:  make(map[int64]([]*mempoolTx)),
 		uncommittedPtxs:     make(map[int64](types.Txs)),
 		uncommittedPtxsHash: make(map[int64](types.Txs)),
-		uncommittedTxsHashMap: make(map[types.TxHash]types.Tx),
 		pendingBlockTxs:     make(map[int64]TxsMap),
 	}
 	mempool.initWAL()
@@ -753,8 +751,8 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 			if _, ok := mem.uncommittedTxsHash[height]; ok {
 				for _, memTx := range mem.uncommittedTxsHash[height] {
 					hashValue := types.BytesToHash(memTx.tx)
-					if  mem.uncommittedTxsHashMap[hashValue] != nil {
-						delete(mem.uncommittedTxsHashMap, hashValue)
+					if  mem.txsHashMap[hashValue] != nil {
+						delete(mem.txsHashMap, hashValue)
 					}
 				}
 				delete(mem.uncommittedTxsHash, height)
@@ -778,7 +776,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				}
 				for _, txHash := range ptx.Data.TxIds {
 					if mem.txsHashMap[txHash] != nil {
-						delete(mem.uncommittedTxsHashMap, txHash)
+						delete(mem.txsHashMap, txHash)
 					}
 				}
 			}
@@ -808,8 +806,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				txHashMaptx := mem.txsHashMap[txHashValue]
 				if (txHashMaptx != nil) {
 					txsMap[string(txHashMaptx)] = struct{}{}
-					delete(mem.txsHashMap, txHashValue)
-					mem.uncommittedTxsHashMap[txHashValue] = txHashMaptx
 				} else {
 					if !replay_txs {
 						mem.logger.Error("Update mempool can not find tx", txHash)
@@ -845,8 +841,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				txHashMaptx := mem.txsHashMap[txHash]
 				if (txHashMaptx != nil) {
 					txsMap[string(txHashMaptx)] = struct{}{}
-					delete(mem.txsHashMap, txHash)
-					mem.uncommittedTxsHashMap[txHash] = txHashMaptx
 				} else {
 					mem.logger.Error("Update mempool can not find tx", txHash)
 				}
@@ -908,7 +902,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	mem.logger.Info("After Update() uncommitted txsHash size", len(mem.uncommittedTxsHash))
 	mem.logger.Info("After Update() uncommitted ptxs size", len(mem.uncommittedPtxs))
 	mem.logger.Info("After Update() uncommitted ptxsHash size", len(mem.uncommittedPtxsHash))
-	mem.logger.Info("After Update() uncommitted txsHashMap size", len(mem.uncommittedTxsHashMap))
 
 	//mem.NotifiyFetchingTx()
 	return nil
@@ -970,20 +963,12 @@ func (mem *Mempool) Restore(height int64) {
 				mem.txs.PushBack(txs[i])
 			}
 		}
-		if compactBlock {
-			for hash, tx := range mem.uncommittedTxsHashMap {
-				mem.txsHashMap[hash] = tx
-			}
-		}
 	} else if usePtxHash {
 		if txs, ok := mem.uncommittedPtxsHash[height]; ok {
 			size := len(txs)
 			for i := 0; i < size; i++ {
 				mem.ptxsHash.PushBack(txs[i])
 			}
-		}
-		for hash, tx := range mem.uncommittedTxsHashMap {
-			mem.txsHashMap[hash] = tx
 		}
 	} else {
 		if txs, ok := mem.uncommittedPtxs[height]; ok {
