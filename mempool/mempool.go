@@ -808,7 +808,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					txsMap[string(txHashMaptx)] = struct{}{}
 				} else {
 					if !replay_txs {
-						mem.logger.Error("Update mempool can not find tx", txHash)
+						mem.logger.Error("Update mempool can not find", "Tx", fmt.Sprintf("{%X}", txHash))
 					}
 				}
 				// remove from txHash
