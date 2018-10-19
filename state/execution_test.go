@@ -74,7 +74,7 @@ func TestBeginBlockAbsentValidators(t *testing.T) {
 		lastCommit := &types.Commit{BlockID: prevBlockID, Precommits: tc.lastCommitPrecommits}
 
 		block, _ := state.MakeBlock(2, makeTxs(2), lastCommit)
-		_, err = ExecCommitBlock(proxyApp.Consensus(), block, log.TestingLogger())
+		_, err = ExecCommitBlock(proxyApp.Consensus(), block, log.TestingLogger(), state.Validators, state)
 		require.Nil(t, err, tc.desc)
 
 		// -> app must receive an index of the absent validator
@@ -119,7 +119,7 @@ func TestBeginBlockByzantineValidators(t *testing.T) {
 
 		block, _ := state.MakeBlock(10, makeTxs(2), lastCommit)
 		block.Evidence.Evidence = tc.evidence
-		_, err = ExecCommitBlock(proxyApp.Consensus(), block, log.TestingLogger())
+		_, err = ExecCommitBlock(proxyApp.Consensus(), block, log.TestingLogger(), state.Validators, state)
 		require.Nil(t, err, tc.desc)
 
 		// -> app must receive an index of the byzantine validator

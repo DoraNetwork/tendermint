@@ -93,9 +93,6 @@ func LoadStateAtHeight(db dbm.DB, height int64) (state State) {
 // SaveState persists the State, the ValidatorsInfo, and the ConsensusParamsInfo to the database.
 func SaveState(db dbm.DB, s State, height int64) {
 	saveState(db, s, stateKey)
-	if (height > 0) {
-	    db.SetSync(calcStateKey(height), s.Bytes())
-	}
 }
 
 func saveState(db dbm.DB, s State, key []byte) {
@@ -103,6 +100,12 @@ func saveState(db dbm.DB, s State, key []byte) {
 	saveValidatorsInfo(db, nextHeight, s.LastHeightValidatorsChanged, s.Validators)
 	saveConsensusParamsInfo(db, nextHeight, s.LastHeightConsensusParamsChanged, s.ConsensusParams)
 	db.SetSync(stateKey, s.Bytes())
+}
+
+func SaveRoundState(db dbm.DB, s State, height int64) {
+	if (height > 0) {
+	    db.SetSync(calcStateKey(height), s.Bytes())
+	}
 }
 
 //------------------------------------------------------------------------

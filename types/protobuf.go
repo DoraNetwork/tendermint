@@ -71,6 +71,13 @@ func (tm2pb) ConsensusParams(params *ConsensusParams) *types.ConsensusParams {
 	}
 }
 
+func (tm2pb) Evidence(ev Evidence) types.Evidence {
+	return types.Evidence{
+		PubKey: ev.Address(),
+		Height:  ev.Height(),
+	}
+}
+
 func (tm2pb) Random(random VrfRandom) *types.VrfRandom {
 	return &types.VrfRandom{
 			Seed: random.Seed,

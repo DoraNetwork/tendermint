@@ -167,7 +167,7 @@ func (pool *BlockPool) PeekTwoBlocks() (first *types.Block, second *types.Block)
 	if r := pool.requesters[pool.height]; r != nil {
 		first = r.getBlock()
 	}
-	if r := pool.requesters[pool.height+1]; r != nil {
+	if r := pool.requesters[pool.height+4]; r != nil {
 		second = r.getBlock()
 	}
 	return

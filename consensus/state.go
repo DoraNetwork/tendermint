@@ -242,6 +242,7 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 		cs.roundStates[height].state = cs.state.Copy()
 		cs.roundStates[height].state.LastValidators = lastValidators
 		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
+		sm.SaveRoundState(cs.blockExec.GetDb(), cs.roundStates[height].state, height)
 	}
 }
 
@@ -295,6 +296,9 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 			rsWrapper.state = sm.LoadStateAtHeight(cs.blockExec.GetDb(), height)
 		} else {
 			rsWrapper.state = cs.state.Copy()
+			if height > 4 {
+				rsWrapper.state = cs.roundStates[height-4].state.Copy()
+			}
 		}
 		rsWrapper.Validators = rsWrapper.state.Validators
 		if height > 0 {
@@ -1845,7 +1849,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// Execute and commit the block, update and save the state, and update the mempool.
 	// NOTE: the block.AppHash wont reflect these txs until the next block
 	var err error
-	stateCopy, err = cs.blockExec.ApplyBlock(stateCopy, types.BlockID{block.Hash(), blockParts.Header()}, block, cmpctBlk)
+	stateCopy, err = cs.blockExec.ApplyBlock(stateCopy, rsB4, types.BlockID{block.Hash(), blockParts.Header()}, block, cmpctBlk)
 	if err != nil {
 		cs.Logger.Error("Error on ApplyBlock. Did the application crash? Please restart tendermint", "err", err)
 		err := cmn.Kill()

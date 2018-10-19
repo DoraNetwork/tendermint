@@ -284,11 +284,16 @@ FOR_LOOP:
 
 					bcR.store.SaveBlock(first, firstParts, second.LastCommit)
 
+					rsB4 := state
+					if (first.Height > 4) {
+						rsB4 = sm.LoadStateAtHeight(bcR.blockExec.GetDb(), first.Height-4)
+					}
+
 					// NOTE: we could improve performance if we
 					// didn't make the app commit to disk every block
 					// ... but we would need a way to get the hash without it persisting
 					var err error
-					state, err = bcR.blockExec.ApplyBlock(state, firstID, first, nil)
+					state, err = bcR.blockExec.ApplyBlock(state, rsB4, firstID, first, nil)
 					if err != nil {
 						// TODO This is bad, are we zombie?
 						cmn.PanicQ(cmn.Fmt("Failed to process committed block (%d:%X): %v", first.Height, first.Hash(), err))
