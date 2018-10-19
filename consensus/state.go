@@ -1480,7 +1480,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	cs.precommitMtx.Lock()
 	defer cs.precommitMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
-	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit == rs.Step) {
+	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
@@ -1488,16 +1488,6 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	// Must enter prevote before entering precommit
 	if rs.Step < cstypes.RoundStepPrevote || !rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Not ready to enter precommit. Current step: %v", height, round, rs.Step))
-		return
-	}
-
-	// Since cs.state.LastBlockHeight is updated before
-	// sending state transition message, while we've removed
-	// mutex for parallel execution, it is possible that
-	// next height has already entered WaitToCommit state
-	if rs.Step > cstypes.RoundStepPrecommit {
-		cs.Logger.Debug("Ahead of precommit, enter commit")
-		cs.enterCommit(height, round)
 		return
 	}
 
