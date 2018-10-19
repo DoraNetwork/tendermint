@@ -752,8 +752,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		if compactBlock {
 			if _, ok := mem.uncommittedTxsHash[height]; ok {
 				for _, memTx := range mem.uncommittedTxsHash[height] {
-					if  mem.uncommittedTxsHashMap[types.BytesToHash(memTx.tx)] != nil {
-						delete(mem.uncommittedTxsHashMap, types.BytesToHash(memTx.tx))
+					hashValue := types.BytesToHash(memTx.tx)
+					if  mem.uncommittedTxsHashMap[hashValue] != nil {
+						delete(mem.uncommittedTxsHashMap, hashValue)
 					}
 				}
 				delete(mem.uncommittedTxsHash, height)
@@ -797,6 +798,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	if disablePtx {
 		if compactBlock {
 			removedTxsHash := make([]*mempoolTx, 0, mem.txsHash.Len())
+			e := mem.txsHash.Front()
 			for _, txHash := range txs {
 				if (len(txHash) != 32) {
 					return fmt.Errorf("ERROR: txHash %s is not a hash string", txHash)
@@ -814,13 +816,15 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					}
 				}
 				// remove from txHash
-				for e := mem.txsHash.Front(); e != nil; e = e.Next() {
+				for ; e != nil; e = e.Next() {
 					memTx := e.Value.(*mempoolTx)
 					if bytes.Compare(txHash, memTx.tx) == 0 {
 						mem.txsHash.Remove(e)
 						e.DetachPrev()
+						e = e.Next() // move to next pos for next txHash loop
+						removedTxsHash = append(removedTxsHash, memTx)
+						break
 					}
-					removedTxsHash = append(removedTxsHash, memTx)
 				}
 			}
 			if len(removedTxsHash) > 0 {
