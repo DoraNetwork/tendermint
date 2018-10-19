@@ -1798,7 +1798,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	}
 
 	blockID, ok := rs.Votes.Precommits(rs.CommitRound).TwoThirdsMajority()
-	block, blockParts := rs.ProposalBlock, rs.ProposalBlockParts
+	cmpctBlk, block, blockParts := rs.ProposalCMPCTBlock, rs.ProposalBlock, rs.ProposalBlockParts
 
 	if !ok {
 		cmn.PanicSanity(cmn.Fmt("Cannot finalizeCommit, commit does not have two thirds majority"))
@@ -1855,7 +1855,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// Execute and commit the block, update and save the state, and update the mempool.
 	// NOTE: the block.AppHash wont reflect these txs until the next block
 	var err error
-	stateCopy, err = cs.blockExec.ApplyBlock(stateCopy, types.BlockID{block.Hash(), blockParts.Header()}, block)
+	stateCopy, err = cs.blockExec.ApplyBlock(stateCopy, types.BlockID{block.Hash(), blockParts.Header()}, block, cmpctBlk)
 	if err != nil {
 		cs.Logger.Error("Error on ApplyBlock. Did the application crash? Please restart tendermint", "err", err)
 		err := cmn.Kill()

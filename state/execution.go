@@ -89,7 +89,7 @@ func (blockExec *BlockExecutor) ValidateBlock(s State, block *types.Block) error
 // It's the only function that needs to be called
 // from outside this package to process and commit an entire block.
 // It takes a blockID to avoid recomputing the parts hash.
-func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block *types.Block) (State, error) {
+func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block, cmpctBlk *types.Block) (State, error) {
 
 	// if err := blockExec.ValidateBlock(s, block); err != nil {
 	// 	return s, ErrInvalidBlock(err)
@@ -114,7 +114,7 @@ func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block
 	}
 
 	// lock mempool, commit state, update mempoool
-	appHash, err := blockExec.Commit(block)
+	appHash, err := blockExec.Commit(block, cmpctBlk)
 	if err != nil {
 		return s, fmt.Errorf("Commit failed for application: %v", err)
 	}
@@ -145,7 +145,7 @@ func (blockExec *BlockExecutor) ApplyBlock(s State, blockID types.BlockID, block
 // It returns the result of calling abci.Commit (the AppHash), and an error.
 // The Mempool must be locked during commit and update because state is typically reset on Commit and old txs must be replayed
 // against committed state before new txs are run in the mempool, lest they be invalid.
-func (blockExec *BlockExecutor) Commit(block *types.Block) ([]byte, error) {
+func (blockExec *BlockExecutor) Commit(block, cmpctBlk *types.Block) ([]byte, error) {
 	blockExec.mempool.Lock()
 	defer blockExec.mempool.Unlock()
 
@@ -166,9 +166,16 @@ func (blockExec *BlockExecutor) Commit(block *types.Block) ([]byte, error) {
 	blockExec.logger.Info("Committed state", "height", block.Height, "txs", block.NumTxs, "appHash", res.Data)
 
 	// Update mempool.
-	if err := blockExec.mempool.Update(block.Height, block.Txs); err != nil {
-		return nil, err
+	if cmpctBlk != nil {
+		if err := blockExec.mempool.Update(block.Height, cmpctBlk.Txs); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := blockExec.mempool.Update(block.Height, block.Txs); err != nil {
+			return nil, err
+		}
 	}
+
 
 	return res.Data, nil
 }

@@ -288,7 +288,7 @@ FOR_LOOP:
 					// didn't make the app commit to disk every block
 					// ... but we would need a way to get the hash without it persisting
 					var err error
-					state, err = bcR.blockExec.ApplyBlock(state, firstID, first)
+					state, err = bcR.blockExec.ApplyBlock(state, firstID, first, nil)
 					if err != nil {
 						// TODO This is bad, are we zombie?
 						cmn.PanicQ(cmn.Fmt("Failed to process committed block (%d:%X): %v", first.Height, first.Hash(), err))
