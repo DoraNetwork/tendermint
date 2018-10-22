@@ -293,7 +293,7 @@ func (conR *ConsensusReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) 
 			ps.SetHasProposalBlockPart(msg.Height, msg.Round, msg.Part.Index)
 			conR.conS.peerMsgQueue <- msgInfo{msg, src.Key()}
 		case *CMPCTBlockPartMessage:
-			ps.SetHasProposalBlockPart(msg.Height, msg.Round, msg.Part.Index)
+			ps.SetHasProposalCMPCTBlockPart(msg.Height, msg.Round, msg.Part.Index)
 			conR.conS.peerMsgQueue <- msgInfo{msg, src.Key()}
 		default:
 			conR.Logger.Error(cmn.Fmt("Unknown message type %v", reflect.TypeOf(msg)))
@@ -1135,11 +1135,11 @@ func (ps *PeerState) SetHasProposalBlockPart(height int64, round int, index int)
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
 
-	// if ps.Height != height || ps.Round != round {
-	// 	return
-	// }
-
 	prs := ps.getRoundStateAtHeight(height)
+	if prs.Height != height || prs.Round != round {
+		return
+	}
+
 	prs.ProposalBlockParts.SetIndex(index, true)
 }
 
@@ -1362,6 +1362,7 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 		prs.Proposal = false
 		prs.ProposalBlockPartsHeader = types.PartSetHeader{}
 		prs.ProposalBlockParts = nil
+		prs.ProposalCMPCTBlockParts = nil
 		prs.ProposalPOLRound = -1
 		prs.ProposalPOL = nil
 		// We'll update the BitArray capacity later.
@@ -1391,7 +1392,7 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	// }
 
 	if msg.Step == cstypes.RoundStepPropose && msg.Round > ps.latestRound {
-		// rollback happened, clear afterward round states
+		// rollback happened, clear afterward round states(reset current height above, dont delete current height here)
 		for i := msg.Height+1; i < msg.Height+4; i++ {
 			delete(ps.roundStates, int64(i))
 		}
@@ -1421,6 +1422,7 @@ func (ps *PeerState) ApplyCommitStepMessage(msg *CommitStepMessage) {
 	prs := ps.getRoundStateAtHeight(msg.Height)
 	prs.ProposalBlockPartsHeader = msg.BlockPartsHeader
 	prs.ProposalBlockParts = msg.BlockParts
+	prs.ProposalCMPCTBlockParts = msg.BlockParts
 }
 
 // ApplyProposalPOLMessage updates the peer state for the new proposal POL.

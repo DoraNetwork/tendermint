@@ -260,10 +260,13 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.Logger.Info("resetRoundState")
 	cs.latestHeight = height
 	cs.latestVoteHeight = cs.latestHeight
+	cs.cmpctBlockHeight = height
 	for h := range cs.roundStates {
-		if h > height {
+		if h >= height {
 			cs.roundStates[h].timeoutTicker.Stop()
-			delete(cs.roundStates, h)
+			if h != height {
+				delete(cs.roundStates, h)
+			}
 			// restore txs back into mempool
 			cs.mempool.Lock()
 			cs.mempool.Restore(height)
@@ -679,7 +682,7 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 		case height := <-cs.mempool.TxsAvailable():
 			cs.handleTxsAvailable(height)
 		case txHash := <-cs.mempool.TxResponsed():
-			// FIXME: pass correct height from mempool
+			// TODO: FIXME: pass correct height from mempool
 			cs.handleBuildProposalBlock(cs.cmpctBlockHeight, txHash)
 		case mi = <-cs.peerMsgQueue:
 			cs.wal.Save(mi)
@@ -898,10 +901,10 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 			// Move onto the next step
-			cs.enterPrevote(cs.cmpctBlockHeight, rs.Round)
+			cs.enterPrevote(height, rs.Round)
 		} else if rs.Step == cstypes.RoundStepCommit {
 			// If we're waiting on the proposal block...
-			cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+			cs.tryFinalizeCommit(height)
 			// Trigger next height to enter propose step
 			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
 		} else if cs.isProposalComplete(height) {
@@ -927,10 +930,10 @@ func (cs *ConsensusState) handleBuildProposalBlock(height int64, txHash []byte) 
 			if cs.isProposalComplete(height) &&
 				(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
 				// Move onto the next step
-				cs.enterPrevote(cs.cmpctBlockHeight, rs.Round)
+				cs.enterPrevote(height, rs.Round)
 			} else if rs.Step == cstypes.RoundStepCommit {
 				// If we're waiting on the proposal block...
-				cs.tryFinalizeCommit(cs.cmpctBlockHeight)
+				cs.tryFinalizeCommit(height)
 			}
 		}
 	}
@@ -1165,7 +1168,7 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 	}
 
 	// Reached new height timeout?
-	if !cs.config.PipelineNonstop() {
+	if !cs.config.PipelineNonstop() && round == 0 {
 		rs := cs.GetRoundStateAtHeight(height)
 		if !rs.timeout[cstypes.RoundStepNewHeight] {
 			cs.Logger.Debug("Can't enter propose: !rs.timeout[cstypes.RoundStepNewHeight]", "height", height, "round", round)
@@ -1228,7 +1231,7 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 
 	// Make proposal
 	polRound, polBlockID := rs.Votes.POLInfo()
-	// proposal header is blockParts header but send cmpctBlockParts
+	// proposal header is blockParts header(equal cmpctBlockParts header) but send cmpctBlockParts
 	proposal := types.NewProposal(height, round, blockParts.Header(), polRound, polBlockID)
 	if err := cs.privValidator.SignProposal(cs.state.ChainID, proposal); err == nil {
 		// Set fields
@@ -1590,9 +1593,12 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs.LockedRound = 0
 	rs.LockedBlock = nil
 	rs.LockedBlockParts = nil
+
 	if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
+		rs.ProposalCMPCTBlock = nil
+		rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 	}
 	cs.eventBus.PublishEventUnlock(cs.RoundStateEvent(height))
 	cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{})
@@ -1615,7 +1621,7 @@ func (cs *ConsensusState) canEnterPrecommit(height int64, round int) bool {
 	}
 
 	rs := cs.GetRoundStateAtHeight(height)
-	if rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
+	if rs.Votes.Prevotes(round).HasTwoThirdsAny() {
 		cs.Logger.Debug("Can enter precommit: got +2/3 votes")
 		return true
 	}
@@ -1739,8 +1745,9 @@ func (cs *ConsensusState) canEnterCommit(height int64, round int) bool {
 	// since precommit timeout will lead to pipeline rollback
 
 	rs := cs.GetRoundStateAtHeight(height)
-	if !rs.Votes.Precommits(rs.Round).HasTwoThirdsMajority() {
-		cs.Logger.Debug("Can't enter commit: not reached +2/3 majority", "height", height, "round", round)
+
+	if !rs.Votes.Precommits(round).HasTwoThirdsMajority() {
+		cs.Logger.Debug("Can't enter commit: not reached +2/3 majority")
 		return false
 	}
 
