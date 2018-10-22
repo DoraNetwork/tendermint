@@ -477,6 +477,9 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 		reqRes.SetCallback(cb)
 	}
 
+	if reqRes.Response.Value.(*abci.Response_CheckTx).CheckTx.Code != abci.CodeTypeOK {
+		return fmt.Errorf("Fail to Add Tx %s", reqRes.Response.Value.(*abci.Response_CheckTx).CheckTx.Log)
+	}
 	return nil
 }
 
