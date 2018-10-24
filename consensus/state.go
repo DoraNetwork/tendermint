@@ -300,7 +300,12 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 		} else {
 			rsWrapper.state = cs.state.Copy()
 			if height > 4 {
-				rsWrapper.state = cs.roundStates[height-4].state.Copy()
+				rsB4 := cs.roundStates[height-4]
+				if rsB4 != nil {
+					rsWrapper.state = rsB4.state.Copy()
+				} else {
+					rsWrapper.state = sm.LoadStateAtHeight(cs.blockExec.GetDb(), height-4)
+				}
 			}
 		}
 		rsWrapper.Validators = rsWrapper.state.Validators
