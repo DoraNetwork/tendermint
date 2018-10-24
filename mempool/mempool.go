@@ -72,6 +72,9 @@ var replayTx types.Tx
 var replayHashTx map[types.TxHash]types.Tx
 var repeatTxEpoch = (int)(10000)
 
+var MempoolWaitSignal bool = false
+var MempoolSignalChannel = make(chan interface{})
+
 type TxsMap map[string]struct{}
 
 // Mempool is an ordered in-memory pool for transactions before they are proposed in a consensus
@@ -661,6 +664,11 @@ func (mem *Mempool) TxResponsed() <-chan int64 {
 // Reap returns a list of transactions currently in the mempool.
 // If maxTxs is -1, there is no cap on the number of returned transactions.
 func (mem *Mempool) Reap(maxTxs int) types.Txs {
+	if (MempoolWaitSignal) {
+		<- MempoolSignalChannel
+		MempoolWaitSignal = false
+	}
+
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 
