@@ -861,6 +861,13 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 		}
 	case cstypes.RoundStepPrecommitWait:
 		// rollback the pipeline
+		cs.commitMtx.Lock()
+		rs = cs.GetRoundStateAtHeight(ti.Height)
+		if rs.Step == cstypes.RoundStepCommit {
+			cs.commitMtx.Unlock()
+			return
+		}
+		cs.commitMtx.Unlock()
 		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
 		cs.resetRoundState(ti.Height, ti.Round)
 		cs.startNewRound(ti.Height, ti.Round)
