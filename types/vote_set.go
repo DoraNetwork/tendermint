@@ -172,7 +172,7 @@ func (voteSet *VoteSet) addVote(vote *Vote) (added bool, err error) {
 	if !bytes.Equal(valAddr, lookupAddr) {
 		return false, errors.Wrapf(ErrVoteInvalidValidatorAddress,
 			"vote.ValidatorAddress (%X) does not match address (%X) for vote.ValidatorIndex (%d)",
-			valAddr, lookupAddr, valIndex)
+			valAddr.Bytes(), lookupAddr, valIndex)
 	}
 
 	// If we already know of this vote, return false.
