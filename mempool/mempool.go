@@ -812,7 +812,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 			e := mem.txsHash.Front()
 			for _, txHash := range txs {
 				if (len(txHash) != 32) {
-					return fmt.Errorf("ERROR: txHash %s is not a hash string", txHash)
+					mem.logger.Info(fmt.Sprintf("WARN: block tx %s is not a hash string", txHash))
 				}
 				
 				txHashValue := types.BytesToHash(txHash)

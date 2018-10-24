@@ -1610,6 +1610,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs.LockedBlockParts = nil
 
 	if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
+		cs.Logger.Debug("Dont received committed block, reset ProposalBlockParts to let peer gossip data")
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 		rs.ProposalCMPCTBlock = nil
@@ -1966,7 +1967,11 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 	cs.mempool.Lock()
 	if compactBlock {
-		cs.mempool.Update(height, rs.ProposalCMPCTBlock.Data.Txs)
+		if rs.ProposalCMPCTBlock != nil && rs.ProposalCMPCTBlock.Data != nil {
+			cs.mempool.Update(height, rs.ProposalCMPCTBlock.Data.Txs)
+		} else {
+			cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
+		}
 	} else {
 		cs.mempool.Update(height, rs.ProposalBlock.Data.Txs)
 	}
@@ -2265,6 +2270,7 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 		// update latest vote height if necessary
 		if height > cs.latestVoteHeight {
 			cs.latestVoteHeight = height
+			cs.Logger.Debug("update self vote height", cs.latestVoteHeight)
 		}
 	}
 

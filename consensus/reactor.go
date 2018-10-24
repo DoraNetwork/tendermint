@@ -625,6 +625,9 @@ OUTER_LOOP:
 		rs := conR.conS.GetRoundState()
 		prs := ps.GetRoundState()
 
+		// logger.Debug("gossipDataRoutine", "rsHeight", rs.Height, "rsRound", rs.Round,
+		// 	"prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
+
 		if prs.Height == rs.Height {
 			if conR.pushProposal(rs, prs, peer, ps, logger) {
 				continue OUTER_LOOP
@@ -767,8 +770,8 @@ OUTER_LOOP:
 			continue OUTER_LOOP
 		}
 
-		//logger.Debug("gossipVotesRoutine", "rsHeight", rs.Height, "rsRound", rs.Round,
-		//	"prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
+		// logger.Debug("gossipVotesRoutine", "rsHeight", rs.Height, "rsRound", rs.Round,
+		// 	"prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
 
 		// If height is lower than peer
 		if rs.Height < prs.Height {
@@ -1423,6 +1426,15 @@ func (ps *PeerState) ApplyCommitStepMessage(msg *CommitStepMessage) {
 	prs.ProposalBlockPartsHeader = msg.BlockPartsHeader
 	prs.ProposalBlockParts = msg.BlockParts
 	prs.ProposalCMPCTBlockParts = msg.BlockParts
+
+	if prs.ProposalBlockParts.IsEmpty() {
+		// Peer dont have the consensus block, subtraction 1 to gossip data to the peer
+		ps.latestHeight = msg.Height - 1
+		ps.logger.Debug("ApplyCommitStepMessage header", prs.ProposalBlockPartsHeader.String(),
+			 "sub latestHeight", ps.latestHeight)
+	}
+
+	ps.logger.Debug("ApplyCommitStepMessage Reset ProposalBlockPartsHeader", )
 }
 
 // ApplyProposalPOLMessage updates the peer state for the new proposal POL.
