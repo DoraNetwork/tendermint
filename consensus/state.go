@@ -681,9 +681,12 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 		select {
 		case height := <-cs.mempool.TxsAvailable():
 			cs.handleTxsAvailable(height)
-		case txHash := <-cs.mempool.TxResponsed():
-			// TODO: FIXME: pass correct height from mempool
-			cs.handleBuildProposalBlock(cs.cmpctBlockHeight, txHash)
+		case txHeight := <-cs.mempool.TxResponsed():
+			if txHeight < 0 {
+				cs.Logger.Error("mempool TxResponsed height", txHeight, "abnormal, Use cmpctBlockHeight", cs.cmpctBlockHeight)
+				txHeight = cs.cmpctBlockHeight
+			}
+			cs.handleBuildProposalBlock(txHeight)
 		case mi = <-cs.peerMsgQueue:
 			cs.wal.Save(mi)
 			// handles proposals, block parts, votes
@@ -922,7 +925,7 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 }
 
 // handleBuildProposalBlock: handle requested tx and build ProposalBlock
-func (cs *ConsensusState) handleBuildProposalBlock(height int64, txHash []byte) {
+func (cs *ConsensusState) handleBuildProposalBlock(height int64) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 

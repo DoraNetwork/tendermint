@@ -32,7 +32,7 @@ type Mempool interface {
 	TxsAvailable() <-chan int64
 	EnableTxsAvailable()
 
-	TxResponsed() <-chan []byte
+	TxResponsed() <-chan int64
 
 	GetTx(tx []byte, from int32, to int32) (bool, Tx)
 	TxsFetching() <-chan [][]byte
@@ -53,7 +53,7 @@ func (m MockMempool) Restore(height int64)                      			  {}
 func (m MockMempool) Flush()                                                  {}
 func (m MockMempool) TxsAvailable() <-chan int64                              { return make(chan int64) }
 func (m MockMempool) EnableTxsAvailable()                                     {}
-func (m MockMempool) TxResponsed() <-chan []byte                              { return make(chan []byte) }
+func (m MockMempool) TxResponsed() <-chan int64                               { return make(chan int64) }
 func (m MockMempool) GetTx(tx []byte, from int32, to int32) (bool, Tx)        { return true, nil }
 func (m MockMempool) TxsFetching() <-chan [][]byte                            { return make(chan [][]byte) }
 

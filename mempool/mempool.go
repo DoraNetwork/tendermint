@@ -96,7 +96,7 @@ type Mempool struct {
 	recheckEnd           *clist.CElement // re-checking stops here
 	notifiedTxsAvailable bool            // true if fired on txsAvailable for this height
 	txsAvailable         chan int64      // fires the next height once for each height, when the mempool is not empty
-	TxsAllRequested      chan []byte     // all tx requested arrived, used for response of GetTx
+	TxsAllRequested      chan int64     // all tx requested arrived, used for response of GetTx
 	fetchingTx           [][]byte		 // fetching tx from remote peer
 	requestingTx		 chan [][]byte   // requesting tx from remote peer
 	// Keep a cache of already-seen txs.
@@ -152,7 +152,7 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 	mempool.initWAL()
 	mempool.fetchingTx = make([][]byte, 0)
 	proxyAppConn.SetResponseCallback(mempool.resCb)
-	mempool.TxsAllRequested = make(chan []byte, 1)
+	mempool.TxsAllRequested = make(chan int64, 1)
 	mempool.requestingTx = make(chan [][]byte, 1)
 
 	testConfig, _ := emtConfig.ParseConfig()
@@ -445,8 +445,8 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 		types.RcPtxInBlock()
 		return nil
 	}
-	// Use the hash send from remote peer
-	mem.handleTxArrive(hash)
+	// // Use the hash send from remote peer
+	// mem.handleTxArrive(hash)
 	// CACHE
 	if mem.cache.Exists(tx) {
 		return fmt.Errorf("Tx already exists in cache")
@@ -494,7 +494,7 @@ func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
 	}
 }
 
-func (mem *Mempool) handleTxArrive(txHash []byte) {
+func (mem *Mempool) handleTxArrive(height int64, txHash []byte) {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 	if (len(mem.fetchingTx) == 0 || txHash == nil) {
@@ -509,7 +509,7 @@ func (mem *Mempool) handleTxArrive(txHash []byte) {
 	if (len(mem.fetchingTx) == 0) {
 		// notify, the txHash not useful now
 		mem.logger.Info("txs all arrived")
-		mem.TxsAllRequested <- txHash
+		mem.TxsAllRequested <- height
 	}
 }
 
@@ -528,8 +528,10 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				mem.cache.Remove(tx)
 			}
 
+			txHeight := (int64)(-1)
 			if height := mem.isInPendingBlock(tx); height > 0 {
 				mem.uncommittedTxs[height] = append(mem.uncommittedTxs[height], memTx)
+				txHeight = height
 			} else {
 				// f, _ := os.Create("/tmp/replaydata")
 				// defer f.Close()
@@ -558,6 +560,7 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				}
 				mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
 			}
+			mem.handleTxArrive(txHeight, r.CheckTx.Data)
 		} else {
 			// ignore bad transaction
 			mem.logger.Info("Rejected bad transaction", "tx", tx, "res", r)
@@ -653,7 +656,7 @@ func (mem *Mempool) notifyTxsAvailable() {
 }
 
 // TxResponsed is GetTx response
-func (mem *Mempool) TxResponsed() <-chan []byte {
+func (mem *Mempool) TxResponsed() <-chan int64 {
 	return mem.TxsAllRequested
 }
 
