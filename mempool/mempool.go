@@ -495,8 +495,6 @@ func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
 }
 
 func (mem *Mempool) handleTxArrive(height int64, txHash []byte) {
-	mem.proxyMtx.Lock()
-	defer mem.proxyMtx.Unlock()
 	if (len(mem.fetchingTx) == 0 || txHash == nil) {
 		return
 	}
