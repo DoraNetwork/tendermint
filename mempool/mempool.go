@@ -357,7 +357,11 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 				return false, replayHashTx[types.BytesToHash(hash)]
 			}
 		}
-		mem.wal.Write([]byte(fmt.Sprintf("Get Tx{%X}\n", hash)))
+		timeStamp := time.Now()
+		mem.wal.Write(
+			[]byte(
+				fmt.Sprintf("[%d:%d:%d:%d] Get Tx{0x%X}\n",
+				timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hash)))
 		mem.wal.Sync()
 
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
@@ -404,7 +408,7 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			cmn.PanicSanity(cmn.Fmt("GetTx EncodePtx fail"))
 		}
 		return false, txsInPts
-	} 
+	}
 	return false, nil
 }
 
@@ -545,7 +549,11 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				mem.txs.PushBack(memTx)
 				if (disablePtx || usePtxHash) {
 					hashValue := types.BytesToHash(r.CheckTx.Data)
-					mem.wal.Write([]byte(fmt.Sprintf("Add Tx{%X}\n", hashValue)))
+					timeStamp := time.Now()
+					mem.wal.Write(
+						[]byte(
+							fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
+							timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
 					mem.txsHashMap[hashValue] = tx
 				}
 				if disablePtx && compactBlock {
@@ -769,7 +777,11 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				for _, memTx := range mem.uncommittedTxsHash[height] {
 					hashValue := types.BytesToHash(memTx.tx)
 					if  mem.txsHashMap[hashValue] != nil {
-						mem.wal.Write([]byte(fmt.Sprintf("Del Tx{%X}\n", hashValue)))
+						timeStamp := time.Now()
+						mem.wal.Write(
+							[]byte(
+								fmt.Sprintf("[%d:%d:%d:%d] Del Tx{0x%X}\n",
+								timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
 						delete(mem.txsHashMap, hashValue)
 					}
 				}
@@ -827,7 +839,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					txsMap[string(txHashMaptx)] = struct{}{}
 				} else {
 					if !replay_txs {
-						errMsg := fmt.Sprintf("Update mempool can not find Tx{%X}", txHash)
+						timeStamp := time.Now()
+						errMsg := fmt.Sprintf("[%d:%d:%d:%d] Update mempool can not find Tx{%X}",
+											timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), txHash)
 						mem.wal.Write([]byte(errMsg))
 						mem.logger.Error(errMsg)
 					}
