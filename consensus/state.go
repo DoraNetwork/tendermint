@@ -239,11 +239,8 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 	if _, ok := cs.roundStates[height]; ok {
-		lastValidators := cs.roundStates[height].Validators.Copy()
 		cs.roundStates[height].state = cs.state.Copy()
-		cs.roundStates[height].state.LastValidators = lastValidators
 		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
-		sm.SaveRoundState(cs.blockExec.GetDb(), cs.roundStates[height].state, height)
 	}
 }
 
@@ -609,7 +606,7 @@ func (cs *ConsensusState) reconstructLastCommit(state sm.State) {
 	if state.LastBlockHeight == 0 {
 		return
 	}
-	seenCommit := cs.blockStore.LoadSeenCommit(state.LastBlockHeight)
+	seenCommit := cs.blockStore.LoadSeenCommit(state.LastBlockHeight-3)
 	lastPrecommits := types.NewVoteSet(state.ChainID, state.LastBlockHeight, seenCommit.Round(), types.VoteTypePrecommit, state.LastValidators)
 	for _, precommit := range seenCommit.Precommits {
 		if precommit == nil {
@@ -1297,6 +1294,15 @@ func (cs *ConsensusState) isProposalComplete(height int64) bool {
 	return rs.IsProposalComplete()
 }
 
+func (cs *ConsensusState) getB4State(height int64) sm.State {
+	b4Height := int64(0)
+	if (height > 4) {
+		b4Height = height - 4
+	}
+
+	return cs.GetRoundStateAtHeight(b4Height).state
+}
+
 // Create the next block to propose and return it.
 // Returns nil block upon error.
 // NOTE: keep it side-effect free for clarity.
@@ -1327,10 +1333,7 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 	}
 
 	// Mempool validated transactions
-	rsB4 := cs.state
-	if (height > 4) {
-		rsB4 = cs.GetRoundStateAtHeight(height - 4).state
-	}
+	rsB4 := cs.getB4State(height)
 	evidence := cs.evpool.PendingEvidence()
 	if (compactBlock) {
 		txsHash := cs.mempool.Reap(cs.config.MaxBlockSizeTxs)
@@ -1460,10 +1463,7 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 		return
 	}
 
-	rsB4 := cs.state
-	if (height > 4) {
-		rsB4 = cs.GetRoundStateAtHeight(height-4).state
-	}
+	rsB4 := cs.getB4State(height)
 	// Validate proposal block
 	err := cs.blockExec.ValidateBlock(rsB4, rs.ProposalBlock)
 	if err != nil {
@@ -1594,10 +1594,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	// If +2/3 prevoted for proposal block, stage and precommit it
 	if rs.ProposalBlock.HashesTo(blockID.Hash) {
 		cs.Logger.Info("enterPrecommit: +2/3 prevoted proposal block. Locking", "hash", blockID.Hash)
-		rsB4 := cs.state
-		if (height > 4) {
-			rsB4 = cs.GetRoundStateAtHeight(height-4).state
-		}
+		rsB4 := cs.getB4State(height)
 		// Validate the block.
 		if err := cs.blockExec.ValidateBlock(rsB4, rs.ProposalBlock); err != nil {
 			cmn.PanicConsensus(cmn.Fmt("enterPrecommit: +2/3 prevoted for an invalid block: %v", err))
@@ -1836,10 +1833,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	if !block.HashesTo(blockID.Hash) {
 		cmn.PanicSanity(cmn.Fmt("Cannot finalizeCommit, ProposalBlock does not hash to commit hash"))
 	}
-	rsB4 := cs.state
-	if (height > 4) {
-		rsB4 = cs.GetRoundStateAtHeight(height-4).state
-	}
+	rsB4 := cs.getB4State(height)
 	if err := cs.blockExec.ValidateBlock(rsB4, block); err != nil {
 		cmn.PanicConsensus(cmn.Fmt("+2/3 committed an invalid block: %v", err))
 	}
@@ -1959,12 +1953,9 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 		return ErrInvalidProposalPOLRound
 	}
 
-	rsB4Validators := rs.Validators
-	if proposal.Height > 4 {
-		rsB4Validators = cs.GetRoundStateAtHeight(proposal.Height - 4).Validators
-	}
 	// Verify signature
-	if !rsB4Validators.GetProposerAtHeight(proposal.Height, proposal.Round).PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
+	rsB4 := cs.getB4State(proposal.Height)
+	if !rsB4.Validators.GetProposerAtHeight(proposal.Height, proposal.Round).PubKey.VerifyBytes(types.SignBytes(cs.state.ChainID, proposal), proposal.Signature) {
 		return ErrInvalidProposalSignature
 	}
 

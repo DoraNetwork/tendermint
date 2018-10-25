@@ -108,7 +108,7 @@ func (blockExec *BlockExecutor) ApplyBlock(s State, rsB4 State, blockID types.Bl
 	fail.Fail() // XXX
 
 	// update the state with the block and responses
-	s, err = updateState(s, blockID, block.Header, abciResponses)
+	s, err = updateState(s, rsB4, blockID, block.Header, abciResponses)
 	if err != nil {
 		return s, fmt.Errorf("Commit failed for application: %v", err)
 	}
@@ -391,7 +391,7 @@ func changeInVotingPowerMoreOrEqualToOneThird(currentSet *types.ValidatorSet, up
 }
 
 // updateState returns a new State updated according to the header and responses.
-func updateState(s State, blockID types.BlockID, header *types.Header,
+func updateState(s State, rsB4 State, blockID types.BlockID, header *types.Header,
 	abciResponses *ABCIResponses) (State, error) {
 
 	// copy the valset so we can apply changes from EndBlock
@@ -436,7 +436,7 @@ func updateState(s State, blockID types.BlockID, header *types.Header,
 		LastBlockID:                      blockID,
 		LastBlockTime:                    header.Time,
 		Validators:                       nextValSet,
-		LastValidators:                   s.Validators.Copy(),
+		LastValidators:                   rsB4.Validators.Copy(),
 		LastHeightValidatorsChanged:      lastHeightValsChanged,
 		ConsensusParams:                  nextParams,
 		LastHeightConsensusParamsChanged: lastHeightParamsChanged,

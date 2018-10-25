@@ -273,7 +273,12 @@ FOR_LOOP:
 				// NOTE: we can probably make this more efficient, but note that calling
 				// first.Hash() doesn't verify the tx contents, so MakePartSet() is
 				// currently necessary.
-				err := state.Validators.VerifyCommit(
+				b4Height := int64(0)
+				if first.Height > 4 {
+					b4Height = first.Height - 4
+				}
+				rsB4 := sm.LoadStateAtHeight(bcR.blockExec.GetDb(), b4Height)
+				err := rsB4.Validators.VerifyCommit(
 					chainID, firstID, first.Height, second.LastCommit)
 				if err != nil {
 					bcR.Logger.Error("Error in validation", "err", err)
@@ -283,11 +288,6 @@ FOR_LOOP:
 					bcR.pool.PopRequest()
 
 					bcR.store.SaveBlock(first, firstParts, second.LastCommit)
-
-					rsB4 := state
-					if (first.Height > 4) {
-						rsB4 = sm.LoadStateAtHeight(bcR.blockExec.GetDb(), first.Height-4)
-					}
 
 					// NOTE: we could improve performance if we
 					// didn't make the app commit to disk every block
