@@ -99,6 +99,7 @@ type ConsensusState struct {
 
 	// internal state
 	mtx sync.Mutex
+	newRoundMtx sync.Mutex
 	precommitMtx sync.Mutex
 	commitMtx sync.Mutex
 	roundStates map[int64]*RoundStateWrapper
@@ -257,7 +258,15 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
+	// use newRoundMtx as newRoundMtx may come not one time and need not reset each time
+	cs.newRoundMtx.Lock()
+	cs.newRoundMtx.Unlock()
 	cs.Logger.Info("resetRoundState")
+	rs := cs.getRoundStateAtHeight(height)
+	if round <= rs.Round {
+		cs.Logger.Debug(cmn.Fmt("resetRoundState(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
+		return
+	}
 	cs.latestHeight = height
 	cs.latestVoteHeight = cs.latestHeight
 	cs.cmpctBlockHeight = height
@@ -1004,6 +1013,8 @@ func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundS
 // Enter: +2/3 prevotes any or +2/3 precommits for block or any from (height, round)
 // NOTE: cs.StartTime was already set for height.
 func (cs *ConsensusState) enterNewRound(height int64, round int) {
+	cs.newRoundMtx.Lock()
+	defer cs.newRoundMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && rs.Step != cstypes.RoundStepNewHeight) {
 		cs.Logger.Debug(cmn.Fmt("enterNewRound(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
