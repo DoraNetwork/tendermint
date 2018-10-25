@@ -99,7 +99,7 @@ type ConsensusState struct {
 
 	// internal state
 	mtx sync.Mutex
-	newRoundMtx sync.Mutex
+	resetStateMtx sync.Mutex
 	precommitMtx sync.Mutex
 	commitMtx sync.Mutex
 	roundStates map[int64]*RoundStateWrapper
@@ -255,10 +255,10 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	// use newRoundMtx as newRoundMtx may come not one time and need not reset each time
-	cs.newRoundMtx.Lock()
-	cs.newRoundMtx.Unlock()
-	cs.Logger.Info("resetRoundState")
+	// use resetStateMtx as resetRoundState/enterNewRound may come not one time and need not reset each time
+	cs.resetStateMtx.Lock()
+	defer cs.resetStateMtx.Unlock()
+	cs.Logger.Info(cmn.Fmt("resetRoundState(%v/%v):", height, round))
 	rs := cs.getRoundStateAtHeight(height)
 	if round <= rs.Round {
 		cs.Logger.Debug(cmn.Fmt("resetRoundState(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
@@ -268,11 +268,9 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 	cs.latestVoteHeight = cs.latestHeight
 	cs.cmpctBlockHeight = height
 	for h := range cs.roundStates {
-		if h >= height {
+		if h > height {
 			cs.roundStates[h].timeoutTicker.Stop()
-			if h != height {
-				delete(cs.roundStates, h)
-			}
+			delete(cs.roundStates, h)
 			// restore txs back into mempool
 			cs.mempool.Lock()
 			cs.mempool.Restore(height)
@@ -1011,8 +1009,8 @@ func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundS
 // Enter: +2/3 prevotes any or +2/3 precommits for block or any from (height, round)
 // NOTE: cs.StartTime was already set for height.
 func (cs *ConsensusState) enterNewRound(height int64, round int) {
-	cs.newRoundMtx.Lock()
-	defer cs.newRoundMtx.Unlock()
+	cs.resetStateMtx.Lock()
+	defer cs.resetStateMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && rs.Step != cstypes.RoundStepNewHeight) {
 		cs.Logger.Debug(cmn.Fmt("enterNewRound(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
@@ -1192,7 +1190,7 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 	}
 
 	// Reached new height timeout?
-	if !cs.config.PipelineNonstop() && round == 0 {
+	if !cs.config.PipelineNonstop() {
 		rs := cs.GetRoundStateAtHeight(height)
 		if !rs.timeout[cstypes.RoundStepNewHeight] {
 			cs.Logger.Debug("Can't enter propose: !rs.timeout[cstypes.RoundStepNewHeight]", "height", height, "round", round)
@@ -1369,6 +1367,8 @@ func (cs *ConsensusState) isStepTimeout(height int64, step cstypes.RoundStepType
 // Prevote for LockedBlock if we're locked, or ProposalBlock if valid.
 // Otherwise vote nil.
 func (cs *ConsensusState) enterPrevote(height int64, round int) {
+	cs.resetStateMtx.Lock()
+	defer cs.resetStateMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrevote <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
