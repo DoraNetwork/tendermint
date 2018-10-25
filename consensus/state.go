@@ -441,13 +441,7 @@ func (cs *ConsensusState) OnStart() error {
 	cs.latestHeight = cs.state.LastBlockHeight
 	cs.latestVoteHeight = cs.latestHeight
 	initialHeight = cs.state.LastBlockHeight + 1
-	loadStateFromStore = true
-	for i := 0; i <= 3; i++ {
-		if cs.state.LastBlockHeight - int64(i) > 0 {
-			cs.GetRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
-		}
-	}
-	loadStateFromStore = false
+
 	for i := 1; i <= 4; i++ {
 		cs.scheduleRound0(cs.GetRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
 	}
@@ -620,6 +614,13 @@ func (cs *ConsensusState) reconstructLastCommit(state sm.State) {
 	if !lastPrecommits.HasTwoThirdsMajority() {
 		cmn.PanicSanity("Failed to reconstruct LastCommit: Does not have +2/3 maj")
 	}
+	loadStateFromStore = true
+	for i := 0; i <= 3; i++ {
+		if cs.state.LastBlockHeight - int64(i) > 0 {
+			cs.GetRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
+		}
+	}
+	loadStateFromStore = false
 	rs := cs.GetRoundStateAtHeight(state.LastBlockHeight + 1)
 	rs.LastCommit = lastPrecommits
 }
@@ -1562,7 +1563,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	// the latest POLRound should be this round
 	polRound, _ := rs.Votes.POLInfo()
 	if polRound < round {
-		cmn.PanicSanity(cmn.Fmt("This POLRound should be %v but got %", round, polRound))
+		cmn.PanicSanity(cmn.Fmt("This POLRound should be %v but got %d", round, polRound))
 	}
 
 	// +2/3 prevoted nil. Unlock and precommit nil.
