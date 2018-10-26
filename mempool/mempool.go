@@ -358,11 +358,11 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 			}
 		}
 		timeStamp := time.Now()
-		mem.wal.Write(
-			[]byte(
-				fmt.Sprintf("[%d:%d:%d:%d] Get Tx{0x%X}\n",
+		if mem.wal != nil {
+			mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Get Tx{0x%X}\n",
 				timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hash)))
-		mem.wal.Sync()
+			mem.wal.Sync()
+		}
 
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
@@ -550,11 +550,11 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				if (disablePtx || usePtxHash) {
 					hashValue := types.BytesToHash(r.CheckTx.Data)
 					timeStamp := time.Now()
-					mem.wal.Write(
-						[]byte(
-							fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
-							timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
-					mem.txsHashMap[hashValue] = tx
+					if mem.wal != nil {
+						mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
+								timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
+						mem.txsHashMap[hashValue] = tx
+					}
 				}
 				if disablePtx && compactBlock {
 					memTxHash := &mempoolTx{
@@ -778,11 +778,11 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					hashValue := types.BytesToHash(memTx.tx)
 					if  mem.txsHashMap[hashValue] != nil {
 						timeStamp := time.Now()
-						mem.wal.Write(
-							[]byte(
-								fmt.Sprintf("[%d:%d:%d:%d] Del Tx{0x%X}\n",
-								timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
-						delete(mem.txsHashMap, hashValue)
+						if mem.wal != nil {
+							mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Del Tx{0x%X}\n",
+									timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
+							delete(mem.txsHashMap, hashValue)
+						}
 					}
 				}
 				mem.wal.Sync()
@@ -842,7 +842,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 						timeStamp := time.Now()
 						errMsg := fmt.Sprintf("[%d:%d:%d:%d] Update mempool can not find Tx{%X}",
 											timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), txHash)
-						mem.wal.Write([]byte(errMsg))
+						if mem.wal != nil {
+							mem.wal.Write([]byte(errMsg))
+						}
 						mem.logger.Error(errMsg)
 					}
 				}
@@ -878,7 +880,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					txsMap[string(txHashMaptx)] = struct{}{}
 				} else {
 					errMsg := fmt.Sprintf("Update mempool can not find Tx{%X}", txHash)
-					mem.wal.Write([]byte(errMsg))
+					if mem.wal != nil {
+						mem.wal.Write([]byte(errMsg))
+					}
 					mem.logger.Error(errMsg)
 				}
 			}
