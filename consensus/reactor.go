@@ -481,10 +481,18 @@ func makeRoundStepMessages(rs *cstypes.RoundState) (nrsMsg *NewRoundStepMessage,
 		LastCommitRound:       rs.LastCommit.Round(),
 	}
 	if rs.Step == cstypes.RoundStepCommit {
-		csMsg = &CommitStepMessage{
-			Height:           rs.Height,
-			BlockPartsHeader: rs.ProposalBlockParts.Header(),
-			BlockParts:       rs.ProposalBlockParts.BitArray(),
+		if compactBlock {
+			csMsg = &CommitStepMessage{
+				Height:           rs.Height,
+				BlockPartsHeader: rs.ProposalCMPCTBlockParts.Header(),
+				BlockParts:       rs.ProposalCMPCTBlockParts.BitArray(),
+			}
+		} else {
+			csMsg = &CommitStepMessage{
+				Height:           rs.Height,
+				BlockPartsHeader: rs.ProposalBlockParts.Header(),
+				BlockParts:       rs.ProposalBlockParts.BitArray(),
+			}
 		}
 	}
 	return

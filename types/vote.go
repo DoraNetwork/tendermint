@@ -68,6 +68,7 @@ type Vote struct {
 	Timestamp        time.Time        `json:"timestamp"`
 	Type             byte             `json:"type"`
 	BlockID          BlockID          `json:"block_id"` // zero if vote is nil.
+	CMPCTBlockID     BlockID          `json:"cmpct_block_id"` // zero if vote is nil.
 	Signature        crypto.Signature `json:"signature"`
 }
 

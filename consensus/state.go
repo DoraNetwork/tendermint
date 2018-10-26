@@ -1253,8 +1253,8 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 
 	// Make proposal
 	polRound, polBlockID := rs.Votes.POLInfo()
-	// proposal header is blockParts header(equal cmpctBlockParts header) but send cmpctBlockParts
-	proposal := types.NewProposal(height, round, blockParts.Header(), polRound, polBlockID)
+	// proposal header is cmpctBlockParts header(if not compact block mode, cmpctBlockParts is equal to blockParts)
+	proposal := types.NewProposal(height, round, cmpctBlockParts.Header(), polRound, polBlockID)
 	if err := cs.privValidator.SignProposal(cs.state.ChainID, proposal); err == nil {
 		// Set fields
 		/*  fields set by setProposal and addBlockPart
@@ -1453,14 +1453,15 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 	rs := cs.GetRoundStateAtHeight(height)
 	if rs.LockedBlock != nil {
 		logger.Info("enterPrevote: Block was locked")
-		cs.signAddVote(rs, types.VoteTypePrevote, rs.LockedBlock.Hash(), rs.LockedBlockParts.Header())
+		cs.signAddVote(rs, types.VoteTypePrevote, rs.LockedBlock.Hash(), rs.LockedBlockParts.Header(),
+			rs.LockedCMPCTBlock.Hash(), rs.LockedCMPCTBlockParts.Header())
 		return
 	}
 
 	// If ProposalBlock is nil, prevote nil.
 	if rs.ProposalBlock == nil {
 		logger.Info("enterPrevote: ProposalBlock is nil")
-		cs.signAddVote(rs, types.VoteTypePrevote, nil, types.PartSetHeader{})
+		cs.signAddVote(rs, types.VoteTypePrevote, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
 		return
 	}
 
@@ -1470,7 +1471,7 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 	if err != nil {
 		// ProposalBlock is invalid, prevote nil.
 		logger.Error("enterPrevote: ProposalBlock is invalid", "err", err)
-		cs.signAddVote(rs, types.VoteTypePrevote, nil, types.PartSetHeader{})
+		cs.signAddVote(rs, types.VoteTypePrevote, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
 		return
 	}
 
@@ -1478,7 +1479,8 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 	// NOTE: the proposal signature is validated when it is received,
 	// and the proposal block parts are validated as they are received (against the merkle hash in the proposal)
 	logger.Info("enterPrevote: ProposalBlock is valid")
-	cs.signAddVote(rs, types.VoteTypePrevote, rs.ProposalBlock.Hash(), rs.ProposalBlockParts.Header())
+	cs.signAddVote(rs, types.VoteTypePrevote, rs.ProposalBlock.Hash(), rs.ProposalBlockParts.Header(),
+		rs.ProposalCMPCTBlock.Hash(), rs.ProposalCMPCTBlockParts.Header())
 }
 
 // Enter: any +2/3 prevotes at next round.
@@ -1553,7 +1555,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		} else {
 			cs.Logger.Info("enterPrecommit: No +2/3 prevotes during enterPrecommit. Precommitting nil.")
 		}
-		cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{})
+		cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
 		return
 	}
 
@@ -1577,7 +1579,7 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 			rs.LockedBlockParts = nil
 			cs.eventBus.PublishEventUnlock(cs.RoundStateEvent(height))
 		}
-		cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{})
+		cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
 		return
 	}
 
@@ -1588,7 +1590,8 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		cs.Logger.Info("enterPrecommit: +2/3 prevoted locked block. Relocking")
 		rs.LockedRound = round
 		cs.eventBus.PublishEventRelock(cs.RoundStateEvent(height))
-		cs.signAddVote(rs, types.VoteTypePrecommit, blockID.Hash, blockID.PartsHeader)
+		cs.signAddVote(rs, types.VoteTypePrecommit, blockID.Hash, blockID.PartsHeader, 
+			rs.LockedCMPCTBlock.Hash(), rs.LockedCMPCTBlockParts.Header())
 		return
 	}
 
@@ -1606,7 +1609,8 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		rs.LockedCMPCTBlock = rs.ProposalCMPCTBlock
 		rs.LockedCMPCTBlockParts = rs.ProposalCMPCTBlockParts
 		cs.eventBus.PublishEventLock(cs.RoundStateEvent(height))
-		cs.signAddVote(rs, types.VoteTypePrecommit, blockID.Hash, blockID.PartsHeader)
+		cs.signAddVote(rs, types.VoteTypePrecommit, blockID.Hash, blockID.PartsHeader,
+			rs.ProposalCMPCTBlock.Hash(), rs.ProposalCMPCTBlockParts.Header())
 		return
 	}
 
@@ -1620,13 +1624,17 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 
 	if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
 		cs.Logger.Debug("Dont received committed block, reset ProposalBlockParts to let peer gossip data")
+		CMPCTBlockID, ok := rs.Votes.Prevotes(round).GetCMPCTBlockMaj23()
+		if compactBlock && !ok {
+			cs.Logger.Error("Dont get cmpct block maj23 in precommit, this may not happen")
+		}
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 		rs.ProposalCMPCTBlock = nil
-		rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
+		rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(CMPCTBlockID.PartsHeader)
 	}
 	cs.eventBus.PublishEventUnlock(cs.RoundStateEvent(height))
-	cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{})
+	cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
 }
 
 func (cs *ConsensusState) canEnterPrecommit(height int64, round int) bool {
@@ -1746,10 +1754,14 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 		if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
 			// We're getting the wrong block.
 			// Set up ProposalBlockParts and keep waiting.
+			CMPCTBlockID, ok := rs.Votes.Precommits(commitRound).GetCMPCTBlockMaj23()
+			if compactBlock && !ok {
+				cs.Logger.Error("Dont get cmpct block maj23, this may not happen")
+			}
 			rs.ProposalBlock = nil
 			rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 			rs.ProposalCMPCTBlock = nil
-			rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
+			rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(CMPCTBlockID.PartsHeader)
 		} else {
 			// We just need to keep waiting.
 		}
@@ -1961,8 +1973,12 @@ func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
 	}
 
 	rs.Proposal = proposal
-	rs.ProposalBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
-	rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
+	// if cmpct block, proposal.BlockPartsHeader is cmpct block header
+	if compactBlock {
+		rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
+	} else {
+		rs.ProposalBlockParts = types.NewPartSetFromHeader(proposal.BlockPartsHeader)
+	}
 	return nil
 }
 
@@ -2280,7 +2296,8 @@ func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool,
 	return
 }
 
-func (cs *ConsensusState) signVote(rs *RoundStateWrapper, type_ byte, hash []byte, header types.PartSetHeader) (*types.Vote, error) {
+func (cs *ConsensusState) signVote(rs *RoundStateWrapper, type_ byte, hash []byte, header types.PartSetHeader,
+		cmpctHash []byte, cmpctHeader types.PartSetHeader) (*types.Vote, error) {
 	addr := cs.privValidator.GetAddress()
 	valIndex, _ := rs.Validators.GetByAddress(addr)
 	vote := &types.Vote{
@@ -2291,18 +2308,20 @@ func (cs *ConsensusState) signVote(rs *RoundStateWrapper, type_ byte, hash []byt
 		Timestamp:        time.Now().UTC(),
 		Type:             type_,
 		BlockID:          types.BlockID{hash, header},
+		CMPCTBlockID:     types.BlockID{cmpctHash, cmpctHeader},
 	}
 	err := cs.privValidator.SignVote(cs.state.ChainID, vote)
 	return vote, err
 }
 
 // sign the vote and publish on internalMsgQueue
-func (cs *ConsensusState) signAddVote(rs *RoundStateWrapper, type_ byte, hash []byte, header types.PartSetHeader) *types.Vote {
+func (cs *ConsensusState) signAddVote(rs *RoundStateWrapper, type_ byte, 
+		hash []byte, header types.PartSetHeader, cmpctHash []byte, cmpctHeader types.PartSetHeader) *types.Vote {
 	// if we don't have a key or we're not in the validator set, do nothing
 	if cs.privValidator == nil || !rs.Validators.HasAddress(cs.privValidator.GetAddress()) {
 		return nil
 	}
-	vote, err := cs.signVote(rs, type_, hash, header)
+	vote, err := cs.signVote(rs, type_, hash, header, cmpctHash, cmpctHeader)
 	if err == nil {
 		cs.sendInternalMessage(msgInfo{&VoteMessage{vote}, ""})
 		cs.Logger.Info("Signed and pushed vote", "height", rs.Height, "round", rs.Round, "vote", vote, "err", err)
