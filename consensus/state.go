@@ -970,28 +970,29 @@ func (cs* ConsensusState) notifyStateTransition(height int64, typ cstypes.RoundS
 
 func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundStepType) error {
 	rs := cs.GetRoundStateAtHeight(height + 1)
+	cs.Logger.Debug(cmn.Fmt("handleStateTransition height %v type %v next height %v step %v", height, typ, rs.Height, rs.Step))
 	if typ == cstypes.RoundStepCommit {
-		if rs.Step <= cstypes.RoundStepWaitToPropose {
+		if rs.Step == cstypes.RoundStepWaitToPropose {
 			cs.enterPropose(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+		} else if rs.Step == cstypes.RoundStepWaitToPrevote {
 			cs.enterPrevote(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToPrecommit {
+		} else if rs.Step == cstypes.RoundStepWaitToPrecommit {
 			cs.enterPrecommit(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToCommit {
+		} else if rs.Step == cstypes.RoundStepWaitToCommit {
 			cs.enterCommit(rs.Height, rs.Round)
 		}
 	} else if typ == cstypes.RoundStepPrecommit {
-		if rs.Step <= cstypes.RoundStepWaitToPropose {
+		if rs.Step == cstypes.RoundStepWaitToPropose {
 			cs.enterPropose(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+		} else if rs.Step == cstypes.RoundStepWaitToPrevote {
 			cs.enterPrevote(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToPrecommit {
+		} else if rs.Step == cstypes.RoundStepWaitToPrecommit {
 			cs.enterPrecommit(rs.Height, rs.Round)
 		}
 	} else if typ == cstypes.RoundStepPrevote {
-		if rs.Step <= cstypes.RoundStepWaitToPropose {
+		if rs.Step == cstypes.RoundStepWaitToPropose {
 			cs.enterPropose(rs.Height, rs.Round)
-		} else if rs.Step <= cstypes.RoundStepWaitToPrevote {
+		} else if rs.Step == cstypes.RoundStepWaitToPrevote {
 			cs.enterPrevote(rs.Height, rs.Round)
 		}
 	}
