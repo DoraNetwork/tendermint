@@ -253,11 +253,11 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 
 // reset round state, roll back pipeline
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
 	// use resetStateMtx as resetRoundState/enterNewRound may come not one time and need not reset each time
 	cs.resetStateMtx.Lock()
 	defer cs.resetStateMtx.Unlock()
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
 	cs.Logger.Info(cmn.Fmt("resetRoundState(%v/%v):", height, round))
 	rs := cs.getRoundStateAtHeight(height)
 	if round <= rs.Round {
