@@ -828,7 +828,7 @@ OUTER_LOOP:
 		// Catchup logic
 		// If peer is lagging by more than 1, send Commit.
 		// if prs.Height != 0 && rs.Height >= prs.Height+2 {
-		if rs.Height > prs.Height+4 {
+		if rs.Height >= prs.Height+4 {
 			// Load the block commit for prs.Height,
 			// which contains precommit signatures for prs.Height.
 			commit := conR.conS.blockStore.LoadBlockCommit(prs.Height)
