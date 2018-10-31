@@ -1010,9 +1010,9 @@ func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundS
 // NOTE: cs.StartTime was already set for height.
 func (cs *ConsensusState) enterNewRound(height int64, round int) {
 	cs.resetStateMtx.Lock()
-	defer cs.resetStateMtx.Unlock()
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && rs.Step != cstypes.RoundStepNewHeight) {
+		cs.resetStateMtx.Unlock()
 		cs.Logger.Debug(cmn.Fmt("enterNewRound(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
@@ -1059,8 +1059,11 @@ func (cs *ConsensusState) enterNewRound(height int64, round int) {
 		if cs.config.CreateEmptyBlocksInterval > 0 {
 			cs.scheduleTimeout(cs.config.EmptyBlocksInterval(), height, round, cstypes.RoundStepNewRound)
 		}
+		cs.resetStateMtx.Unlock()
 		go cs.proposalHeartbeat(height, round)
 	} else {
+		cs.resetStateMtx.Unlock()
+		// Enter propose may enterPrevote which use resetStateMtx
 		cs.enterPropose(height, round)
 	}
 }
