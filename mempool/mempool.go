@@ -782,10 +782,10 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 							mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Del Tx{0x%X}\n",
 									timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
 							delete(mem.txsHashMap, hashValue)
+							mem.wal.Sync()
 						}
 					}
 				}
-				mem.wal.Sync()
 				delete(mem.uncommittedTxsHash, height)
 				delete(mem.uncommittedTxs, height)
 				delete(mem.pendingBlockTxs, height)
@@ -843,7 +843,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					if !replay_txs {
 						timeStamp := time.Now()
 						errMsg := fmt.Sprintf("[%d:%d:%d:%d] Update mempool can not find Tx{%X}",
-											timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), txHash)
+											timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), txHashValue)
 						if mem.wal != nil {
 							mem.wal.Write([]byte(errMsg))
 						}
@@ -946,7 +946,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	mem.logger.Info("After Update() uncommitted ptxs size", len(mem.uncommittedPtxs))
 	mem.logger.Info("After Update() uncommitted ptxsHash size", len(mem.uncommittedPtxsHash))
 
-	mem.wal.Sync()
+	if mem.wal != nil {
+		mem.wal.Sync()
+	}
 	//mem.NotifiyFetchingTx()
 	return nil
 }
