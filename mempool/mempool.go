@@ -830,7 +830,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 			e := mem.txsHash.Front()
 			for _, txHash := range txs {
 				if (len(txHash) != 32) {
-					mem.logger.Info(fmt.Sprintf("WARN: block tx %s is not a hash string", txHash))
+					// Disable log as fast sync tx is raw tx
+					// TODO: remove tx in mempool during fast sync
+					// mem.logger.Info(fmt.Sprintf("WARN: block tx %s is not a hash string", txHash))
 				}
 				
 				txHashValue := types.BytesToHash(txHash)
