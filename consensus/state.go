@@ -598,20 +598,20 @@ func (cs *ConsensusState) reconstructLastCommit(state sm.State) {
 	if state.LastBlockHeight == 0 {
 		return
 	}
-	seenCommit := cs.blockStore.LoadSeenCommit(state.LastBlockHeight-3)
-	lastPrecommits := types.NewVoteSet(state.ChainID, state.LastBlockHeight, seenCommit.Round(), types.VoteTypePrecommit, state.LastValidators)
-	for _, precommit := range seenCommit.Precommits {
-		if precommit == nil {
-			continue
-		}
-		added, err := lastPrecommits.AddVote(precommit)
-		if !added || err != nil {
-			cmn.PanicCrisis(cmn.Fmt("Failed to reconstruct LastCommit: %v", err))
-		}
-	}
-	if !lastPrecommits.HasTwoThirdsMajority() {
-		cmn.PanicSanity("Failed to reconstruct LastCommit: Does not have +2/3 maj")
-	}
+	// seenCommit := cs.blockStore.LoadSeenCommit(state.LastBlockHeight)
+	// lastPrecommits := types.NewVoteSet(state.ChainID, state.LastBlockHeight, seenCommit.Round(), types.VoteTypePrecommit, state.LastValidators)
+	// for _, precommit := range seenCommit.Precommits {
+	// 	if precommit == nil {
+	// 		continue
+	// 	}
+	// 	added, err := lastPrecommits.AddVote(precommit)
+	// 	if !added || err != nil {
+	// 		cmn.PanicCrisis(cmn.Fmt("Failed to reconstruct LastCommit: %v", err))
+	// 	}
+	// }
+	// if !lastPrecommits.HasTwoThirdsMajority() {
+	// 	cmn.PanicSanity("Failed to reconstruct LastCommit: Does not have +2/3 maj")
+	// }
 	loadStateFromStore = true
 	for i := 0; i <= 3; i++ {
 		if cs.state.LastBlockHeight - int64(i) > 0 {
@@ -619,8 +619,8 @@ func (cs *ConsensusState) reconstructLastCommit(state sm.State) {
 		}
 	}
 	loadStateFromStore = false
-	rs := cs.GetRoundStateAtHeight(state.LastBlockHeight + 1)
-	rs.LastCommit = lastPrecommits
+	// rs := cs.GetRoundStateAtHeight(state.LastBlockHeight + 1)
+	// rs.LastCommit = lastPrecommits
 }
 
 // Updates ConsensusState and increments height to match that of state.
