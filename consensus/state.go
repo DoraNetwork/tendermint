@@ -924,16 +924,12 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
-			// Move onto the next step
 			cs.enterPrevote(height, rs.Round)
 		} else if rs.Step == cstypes.RoundStepCommit {
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(height)
-			// Trigger next height to enter propose step
-			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
-		} else if cs.isProposalComplete(height) {
-			// Trigger next height to enter propose step
-			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+			// Trigger next height to enter commit step
+			cs.notifyStateTransition(height, cstypes.RoundStepCommit)
 		}
 	}
 }
@@ -998,6 +994,10 @@ func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundS
 			cs.enterPropose(rs.Height, rs.Round)
 		} else if rs.Step == cstypes.RoundStepWaitToPrevote {
 			cs.enterPrevote(rs.Height, rs.Round)
+		}
+	} else if typ == cstypes.RoundStepPropose {
+		if rs.Step == cstypes.RoundStepWaitToPropose {
+			cs.enterPropose(rs.Height, rs.Round)
 		}
 	}
 	return nil
@@ -1383,11 +1383,6 @@ func (cs *ConsensusState) enterPrevote(height int64, round int) {
 		return
 	}
 
-	if rs.Step < cstypes.RoundStepPropose {
-		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Not ready to enter prevote. Current step: %v", height, round, rs.Step))
-		return
-	}
-
 	types.RcenterPrevote(height)
 	cs.Logger.Info(cmn.Fmt("enterPrevote(%v/%v). Current: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 
@@ -1527,12 +1522,6 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs := cs.GetRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
-		return
-	}
-
-	// Must enter prevote before entering precommit
-	if rs.Step < cstypes.RoundStepPrevote && !rs.Votes.Prevotes(rs.Round).HasTwoThirdsAny() {
-		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Not ready to enter precommit. Current step: %v", height, round, rs.Step))
 		return
 	}
 
@@ -1709,11 +1698,6 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 	rs := cs.GetRoundStateAtHeight(height)
 	if cstypes.RoundStepCommit <= rs.Step {
 		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
-		return
-	}
-
-	if rs.Step < cstypes.RoundStepPrecommit {
-		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Not ready to enter commit. Current step: %v", height, commitRound, rs.Step))
 		return
 	}
 
@@ -2047,16 +2031,12 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 		if cs.isProposalComplete(height) &&
 			(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
-			// Move onto the next step
 			cs.enterPrevote(height, rs.Round)
 		} else if rs.Step == cstypes.RoundStepCommit {
 			// If we're waiting on the proposal block...
 			cs.tryFinalizeCommit(height)
-			// Trigger next height to enter propose step
-			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
-		} else if cs.isProposalComplete(height) {
-			// Trigger next height to enter propose step
-			cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+			// Trigger next height to enter commit step
+			cs.notifyStateTransition(height, cstypes.RoundStepCommit)
 		}
 		return true, err
 	}
@@ -2134,16 +2114,12 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 				types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 				if cs.isProposalComplete(height) &&
 					(rs.Step == cstypes.RoundStepPropose || rs.Step == cstypes.RoundStepWaitToPrevote) {
-					// Move onto the next step
 					cs.enterPrevote(height, rs.Round)
 				} else if rs.Step == cstypes.RoundStepCommit {
 					// If we're waiting on the proposal block...
 					cs.tryFinalizeCommit(height)
-					// Trigger next height to enter propose step
-					cs.notifyStateTransition(height, cstypes.RoundStepPropose)
-				} else if cs.isProposalComplete(height) {
-					// Trigger next height to enter propose step
-					cs.notifyStateTransition(height, cstypes.RoundStepPropose)
+					// Trigger next height to enter commit step
+					cs.notifyStateTransition(height, cstypes.RoundStepCommit)
 				}
 			}
 		}
