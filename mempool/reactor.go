@@ -122,7 +122,8 @@ func (memR *MempoolReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 		for _, hash := range msg.Hash {
 			_, tx := memR.Mempool.GetTx(hash, types.RawTxHash, types.RawTx)
 			if (tx == nil) {
-				memR.Logger.Error("GetTxMessage:Can not find tx", "hash", hash)
+				txHash := types.BytesToHash(hash)
+				memR.Logger.Error("GetTxMessage:Can not find tx", "hash", txHash)
 				continue
 			}
 			// txs = append(txs, tx)
