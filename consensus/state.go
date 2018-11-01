@@ -880,7 +880,8 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 		// rollback the pipeline
 		cs.commitMtx.Lock()
 		rs = cs.GetRoundStateAtHeight(ti.Height)
-		if rs.Step == cstypes.RoundStepCommit {
+		if rs.Step >= cstypes.RoundStepWaitToCommit {
+			cs.Logger.Debug("Ignoring RoundStepPrecommitWait because we're ahead", "height", rs.Height, "round", rs.Round, "step", rs.Step)
 			cs.commitMtx.Unlock()
 			return
 		}
