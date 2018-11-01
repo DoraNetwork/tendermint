@@ -549,11 +549,11 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				mem.txs.PushBack(memTx)
 				if (disablePtx || usePtxHash) {
 					hashValue := types.BytesToHash(r.CheckTx.Data)
-					timeStamp := time.Now()
+					mem.txsHashMap[hashValue] = tx
 					if mem.wal != nil {
+						timeStamp := time.Now()
 						mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
 								timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
-						mem.txsHashMap[hashValue] = tx
 					}
 				}
 				if disablePtx && compactBlock {
@@ -781,9 +781,9 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 						if mem.wal != nil {
 							mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Del Tx{0x%X}\n",
 									timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
-							delete(mem.txsHashMap, hashValue)
 							mem.wal.Sync()
 						}
+						delete(mem.txsHashMap, hashValue)
 					}
 				}
 				delete(mem.uncommittedTxsHash, height)
