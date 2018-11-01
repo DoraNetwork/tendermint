@@ -131,7 +131,7 @@ type ConsensusState struct {
 	// some functions can be overwritten for testing
 	decideProposal func(height int64, round int)
 	doPrevote      func(height int64, round int)
-	setProposal    func(proposal *types.Proposal) error
+	setProposal    func(proposal *types.Proposal, force bool) error
 
 	// closed when we finish shutting down
 	done chan struct{}
@@ -805,7 +805,7 @@ func (cs *ConsensusState) handleMsg(mi msgInfo) {
 	case *ProposalMessage:
 		// will not cause transition.
 		// once proposal is set, we can receive block parts
-		err = cs.setProposal(msg.Proposal)
+		err = cs.setProposal(msg.Proposal, peerKey == "")
 	case *BlockPartMessage:
 		// if the proposal is complete, we'll enterPrevote or tryFinalizeCommit
 		_, err = cs.addProposalBlockPart(msg.Height, msg.Part, peerKey != "")
@@ -1949,11 +1949,11 @@ func (cs *ConsensusState) truncateRoundStates() {
 
 //-----------------------------------------------------------------------------
 
-func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal) error {
+func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal, force bool) error {
 	// Already have one
 	// TODO: possibly catch double proposals
 	rs := cs.GetRoundStateAtHeight(proposal.Height)
-	if rs.Proposal != nil {
+	if !force && rs.Proposal != nil {
 		return nil
 	}
 
