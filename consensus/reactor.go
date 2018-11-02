@@ -575,6 +575,12 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 }
 
 func (conR *ConsensusReactor) calcGossipRange(rsHeight, prsHeight int64) (start, end int64) {
+	// if late 4 of prs height, dont gossip
+	if prsHeight >= rsHeight + 4 {
+		start = -1
+		end = -1
+		return
+	}
 	if prsHeight <= rsHeight {
 		start = prsHeight
 		end = prsHeight + 4
@@ -603,7 +609,12 @@ OUTER_LOOP:
 		// 	"prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
 
         // calculate gossip range
-        start, end := conR.calcGossipRange(rs.Height, prs.Height)
+		start, end := conR.calcGossipRange(rs.Height, prs.Height)
+		if start == -1 && end == -1 {
+			// Nothing to do. Sleep.
+			time.Sleep(conR.conS.config.PeerGossipSleep())
+			continue OUTER_LOOP
+		}
 
         // gossip missing proposal/block parts
         for i := start; i < end; i++ {
@@ -629,6 +640,7 @@ OUTER_LOOP:
 		continue OUTER_LOOP
 	}
 }
+
 func (conR *ConsensusReactor) gossipCacheDataForCatchup(rs *cstypes.RoundState, prs *cstypes.PeerRoundState,
 	peer p2p.Peer, ps *PeerState, logger log.Logger) {
 	if !compactBlock {
@@ -742,6 +754,11 @@ OUTER_LOOP:
 
 		// calculate gossip range
 		start, end := conR.calcGossipRange(rs.Height, prs.Height)
+		if start == -1 && end == -1 {
+			// Nothing to do. Sleep.
+			time.Sleep(conR.conS.config.PeerGossipSleep())
+			continue OUTER_LOOP
+		}
 
 		// gossip missing votes
 		for i := start; i < end; i++ {
@@ -749,7 +766,9 @@ OUTER_LOOP:
 			peerRs := ps.GetRoundStateAtHeight(i)
 			heightLogger := logger.With("height", rs.Height)
 
-			if selfRs != nil {
+			// only gossip votes the height dont lower than self,
+			// if height lower than self, gossip lastCommit to let peer catch up
+			if selfRs != nil && i >= rs.Height  {
 				// votes are in cache
 				if conR.gossipVotesForHeight(heightLogger, selfRs, peerRs, ps) {
 					continue OUTER_LOOP
@@ -758,11 +777,15 @@ OUTER_LOOP:
 				if i >= rs.Height {
 					continue
 				}
-
-				// votes are not in cache, load from commit
-				commit := conR.conS.blockStore.LoadBlockCommit(i)
-				if ps.PickSendVote(commit) {
-					logger.Debug("Picked Catchup commit to send", "height", prs.Height)
+				Lastcommit := (*types.Commit)(nil)
+				if selfRs != nil {
+					Lastcommit = selfRs.Votes.Precommits(selfRs.CommitRound).MakeCommit()
+				} else {
+					// votes are not in cache, load from commit
+					Lastcommit = conR.conS.LoadCommit(i)
+				}
+				if ps.PickSendVote(Lastcommit) {
+					logger.Debug("Picked Catchup last commit to send", "height", i)
 					continue OUTER_LOOP
 				}
 			}
@@ -787,7 +810,7 @@ OUTER_LOOP:
 func (conR *ConsensusReactor) gossipVotesForHeight(logger log.Logger, rs *cstypes.RoundState, prs *cstypes.PeerRoundState, ps *PeerState) bool {
 	// If there are lastCommits to send...
 	if prs.Step == cstypes.RoundStepNewHeight {
-		if ps.PickSendVote(rs.LastCommit) {
+		if ps.PickSendVote(rs.Votes.Precommits(rs.CommitRound)) {
 			logger.Debug("Picked rs.LastCommit to send")
 			return true
 		}
@@ -892,7 +915,7 @@ OUTER_LOOP:
 		// Maybe send Height/CatchupCommitRound/CatchupCommit.
 		{
 			prs := ps.GetRoundState()
-			if prs.CatchupCommitRound != -1 && 0 < prs.Height && prs.Height <= conR.conS.blockStore.Height() {
+			if prs.CatchupCommitRound != -1 && 4 < prs.Height && prs.Height <= conR.conS.blockStore.Height() {
 				commit := conR.conS.LoadCommit(prs.Height)
 				peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 					Height:  prs.Height,
@@ -1090,7 +1113,12 @@ func (ps *PeerState) SetHasProposalCMPCTBlockPart(height int64, round int, index
 func (ps *PeerState) PickSendVote(votes types.VoteSetReader) bool {
 	if vote, ok := ps.PickVoteToSend(votes); ok {
 		msg := &VoteMessage{vote}
-		ps.logger.Debug("Sending vote message", "ps", ps, "vote", vote)
+		prs := ps.getRoundStateAtHeight(votes.Height())
+		if prs.CatchupCommitRound >= 0 {
+			ps.logger.Debug("Sending vote message for catchup", "ps", ps, "vote", vote, "catchup round", prs.CatchupCommitRound)
+		} else {
+			ps.logger.Debug("Sending vote message", "ps", ps, "vote", vote)
+		}
 		return ps.Peer.Send(VoteChannel, struct{ ConsensusMessage }{msg})
 	}
 	return false
@@ -1138,6 +1166,14 @@ func (ps *PeerState) getVoteBitArray(height int64, round int, type_ byte) *cmn.B
 			return prs.Prevotes
 		case types.VoteTypePrecommit:
 			return prs.Precommits
+		}
+	}
+	if prs.CatchupCommitRound == round {
+		switch type_ {
+		case types.VoteTypePrevote:
+			return nil
+		case types.VoteTypePrecommit:
+			return prs.CatchupCommit
 		}
 	}
 
@@ -1279,10 +1315,10 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	prs := ps.getRoundStateAtHeight(msg.Height)
 
 	// Just remember these values.
-	// psHeight := ps.Height
-	// psRound := ps.Round
-	// psCatchupCommitRound := ps.CatchupCommitRound
-	// psCatchupCommit := ps.CatchupCommit
+	// psHeight := prs.Height
+	// psRound := prs.Round
+	// psCatchupCommitRound := prs.CatchupCommitRound
+	// psCatchupCommit := prs.CatchupCommit
 
 	startTime := time.Now().Add(-1 * time.Duration(msg.SecondsSinceStartTime) * time.Second)
 	prs.Step = msg.Step
@@ -1309,27 +1345,28 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	lh := msg.Height - 3
 	if lh > ps.latestHeight {
 		ps.latestHeight = lh
+		ps.logger.Debug("ApplyNewRoundStepMessage lastestheight", ps.latestHeight, "prs height", msg.Height)
 	}
 
 	// if psHeight == msg.Height && psRound != msg.Round && msg.Round == psCatchupCommitRound {
-		// Peer caught up to CatchupCommitRound.
-		// Preserve psCatchupCommit!
-		// NOTE: We prefer to use prs.Precommits if
-		// pr.Round matches pr.CatchupCommitRound.
-	// 	ps.Precommits = psCatchupCommit
+	// 	// Peer caught up to CatchupCommitRound.
+	// 	// Preserve psCatchupCommit!
+	// 	// NOTE: We prefer to use prs.Precommits if
+	// 	// pr.Round matches pr.CatchupCommitRound.
+	// 	prs.Precommits = psCatchupCommit
 	// }
 	// if psHeight != msg.Height {
 	// 	// Shift Precommits to LastCommit.
 	// 	if psHeight+1 == msg.Height && psRound == msg.LastCommitRound {
-	// 		ps.LastCommitRound = msg.LastCommitRound
-	// 		ps.LastCommit = ps.Precommits
+	// 		prs.LastCommitRound = msg.LastCommitRound
+	// 		prs.LastCommit = prs.Precommits
 	// 	} else {
-	// 		ps.LastCommitRound = msg.LastCommitRound
-	// 		ps.LastCommit = nil
+	// 		prs.LastCommitRound = msg.LastCommitRound
+	// 		prs.LastCommit = nil
 	// 	}
 	// 	// We'll update the BitArray capacity later.
-	// 	ps.CatchupCommitRound = -1
-	// 	ps.CatchupCommit = nil
+	// 	prs.CatchupCommitRound = -1
+	// 	prs.CatchupCommit = nil
 	// }
 }
 
@@ -1347,12 +1384,7 @@ func (ps *PeerState) ApplyCommitStepMessage(msg *CommitStepMessage) {
 	prs.ProposalBlockParts = msg.BlockParts
 	prs.ProposalCMPCTBlockParts = msg.BlockParts
 
-	if prs.ProposalBlockParts.IsEmpty() {
-		ps.logger.Debug("ApplyCommitStepMessage header", prs.ProposalBlockPartsHeader.String(),
-			 "latestHeight", ps.latestHeight)
-	}
-
-	ps.logger.Debug("ApplyCommitStepMessage Reset ProposalBlockPartsHeader", )
+	ps.logger.Debug("ApplyCommitStepMessage header", prs.ProposalBlockPartsHeader.String())
 }
 
 // ApplyProposalPOLMessage updates the peer state for the new proposal POL.

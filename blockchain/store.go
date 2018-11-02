@@ -186,7 +186,8 @@ func (bs *BlockStore) SaveBlock(block *types.Block, blockParts *types.PartSet, s
 
 	// Save block commit (duplicate and separate from the Block)
 	blockCommitBytes := wire.BinaryBytes(block.LastCommit)
-	bs.db.Set(calcBlockCommitKey(height-1), blockCommitBytes)
+	// pipeline PBFT use the height-4 lastCommit
+	bs.db.Set(calcBlockCommitKey(height-4), blockCommitBytes)
 
 	// Save seen commit (seen +2/3 precommits for block)
 	// NOTE: we can delete this at a later height

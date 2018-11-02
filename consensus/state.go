@@ -371,7 +371,7 @@ func (cs *ConsensusState) SetTimeoutTicker(timeoutTicker TimeoutTicker) {
 func (cs *ConsensusState) LoadCommit(height int64) *types.Commit {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	if height == cs.blockStore.Height() {
+	if cs.blockStore.Height() - height < 4 {
 		return cs.blockStore.LoadSeenCommit(height)
 	}
 	return cs.blockStore.LoadBlockCommit(height)
