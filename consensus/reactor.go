@@ -676,7 +676,6 @@ func (conR *ConsensusReactor) gossipCacheDataForCatchup(rs *cstypes.RoundState, 
 
 func (conR *ConsensusReactor) gossipDataForCatchup(logger log.Logger, rs *cstypes.RoundState,
 	prs *cstypes.PeerRoundState, ps *PeerState, peer p2p.Peer) {
-
 	if index, ok := prs.ProposalBlockParts.Not().PickRandom(); ok {
 		// Ensure that the peer's PartSetHeader is correct
 		blockMeta := conR.conS.blockStore.LoadBlockMeta(prs.Height)
@@ -983,8 +982,7 @@ func (ps *PeerState) SetLogger(logger log.Logger) *PeerState {
 // GetRoundState returns an atomic snapshot of the PeerRoundState.
 // There's no point in mutating it since it won't change PeerState.
 func (ps *PeerState) GetRoundState() *cstypes.PeerRoundState {
-	prsCopy := *ps.GetRoundStateAtHeight(ps.latestHeight) // Copy
-	return &prsCopy
+	return ps.GetRoundStateAtHeight(ps.latestHeight)
 }
 
 func (ps *PeerState) TryGetRoundStateAtHeight(height int64) *cstypes.PeerRoundState {
@@ -1001,7 +999,8 @@ func (ps *PeerState) TryGetRoundStateAtHeight(height int64) *cstypes.PeerRoundSt
 func (ps *PeerState) GetRoundStateAtHeight(height int64) *cstypes.PeerRoundState {
 	ps.mtx.Lock()
 	defer ps.mtx.Unlock()
-	return ps.getRoundStateAtHeight(height)
+	prsCopy := *ps.getRoundStateAtHeight(height) // Copy
+	return &prsCopy
 }
 
 func (ps *PeerState) truncateRoundStates(height int64) {
