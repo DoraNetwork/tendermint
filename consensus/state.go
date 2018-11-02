@@ -264,6 +264,8 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 		if h > height {
 			cs.roundStates[h].timeoutTicker.Stop()
 			delete(cs.roundStates, h)
+		}
+		if h >= height {
 			// restore txs back into mempool
 			cs.mempool.Lock()
 			cs.mempool.Restore(height)
