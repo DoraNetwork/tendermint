@@ -99,9 +99,6 @@ type ConsensusState struct {
 
 	// internal state
 	mtx sync.Mutex
-	resetStateMtx sync.Mutex
-	precommitMtx sync.Mutex
-	commitMtx sync.Mutex
 	roundStates map[int64]*RoundStateWrapper
 	state sm.State // State until height-1.
 
@@ -224,14 +221,12 @@ func (cs *ConsensusState) GetState() sm.State {
 
 // GetRoundState returns a copy of the internal consensus state.
 func (cs *ConsensusState) GetRoundState() *cstypes.RoundState {
-	rsCopy := *cs.GetRoundStateAtHeight(cs.state.LastBlockHeight+1) // Copy
+	rsCopy := cs.GetRoundStateAtHeight(cs.state.LastBlockHeight+1)
 	return &rsCopy.RoundState
 }
 
 // Should be invoked within mutex protection
 func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
 	if _, ok := cs.roundStates[height]; ok {
 		cs.roundStates[height].state = cs.state.Copy()
 		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
@@ -242,23 +237,20 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 	cs.setStepTimeout(height, cstypes.RoundStepNewHeight)
 	cs.enterNewRound(height, round+1)
 	for i := 1; i <= 3; i++ {
-		cs.scheduleRound0(cs.GetRoundStateAtHeight(height + int64(i)))
+		cs.scheduleRound0(cs.getRoundStateAtHeight(height + int64(i)))
 	}
 }
 
 // reset round state, roll back pipeline
 func (cs *ConsensusState) resetRoundState(height int64, round int) {
-	// use resetStateMtx as resetRoundState/enterNewRound may come not one time and need not reset each time
-	cs.resetStateMtx.Lock()
-	defer cs.resetStateMtx.Unlock()
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
-	cs.Logger.Info(cmn.Fmt("resetRoundState(%v/%v):", height, round))
 	rs := cs.getRoundStateAtHeight(height)
-	if round <= rs.Round {
+	if round <= rs.Round || rs.Step >= cstypes.RoundStepWaitToCommit {
 		cs.Logger.Debug(cmn.Fmt("resetRoundState(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
+
+	cs.Logger.Info(cmn.Fmt("resetRoundState(%v/%v):", height, round))
+
 	cs.cmpctBlockHeight = height
 	for h := range cs.roundStates {
 		if h > height {
@@ -285,13 +277,14 @@ func (cs *ConsensusState) TryGetRoundStateAtHeight(height int64) *cstypes.RoundS
 	return nil
 }
 
-// GetRoundStateAtHeight Should be invoked within mutex protection
 func (cs *ConsensusState) GetRoundStateAtHeight(height int64) *RoundStateWrapper {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
-	return cs.getRoundStateAtHeight(height)
+	rsCopy := *cs.getRoundStateAtHeight(height)
+	return &rsCopy
 }
 
+// getRoundStateAtHeight Should be invoked within mutex protection
 func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper {
 	if _, ok := cs.roundStates[height]; !ok {
 		rsWrapper := RoundStateWrapper {
@@ -386,15 +379,11 @@ func (cs *ConsensusState) LoadCommit(height int64) *types.Commit {
 
 // LoadBlockCommit loads the commit for a given height.
 func (cs *ConsensusState) LoadBlockCommit(height int64) *types.Commit {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
 	return cs.blockStore.LoadBlockCommit(height)
 }
 
 // LoadSeenCommit loads the commit for a given height.
 func (cs *ConsensusState) LoadSeenCommit(height int64) *types.Commit {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
 	return cs.blockStore.LoadSeenCommit(height)
 }
 
@@ -445,7 +434,7 @@ func (cs *ConsensusState) OnStart() error {
 	initialHeight = cs.state.LastBlockHeight + 1
 
 	for i := 1; i <= 4; i++ {
-		cs.scheduleRound0(cs.GetRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
+		cs.scheduleRound0(cs.getRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
 	}
 
 
@@ -558,13 +547,8 @@ func (cs *ConsensusState) SetProposalAndBlock(proposal *types.Proposal, block *t
 //------------------------------------------------------------
 // internal functions for managing the state
 
-func (cs *ConsensusState) updateHeight(height int64) {
-	rs := cs.GetRoundStateAtHeight(height)
-	rs.Height = height
-}
-
 func (cs *ConsensusState) updateRoundStep(height int64, round int, step cstypes.RoundStepType) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	rs.Round = round
 	rs.Step = step
 }
@@ -578,7 +562,7 @@ func (cs *ConsensusState) scheduleRound0(rs *RoundStateWrapper) {
 
 // Attempt to schedule a timeout (by sending timeoutInfo on the tickChan)
 func (cs *ConsensusState) scheduleTimeout(duration time.Duration, height int64, round int, step cstypes.RoundStepType) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	rs.timeoutTicker.ScheduleTimeout(timeoutInfo{duration, height, round, step})
 }
 
@@ -619,12 +603,10 @@ func (cs *ConsensusState) reconstructLastCommit(state sm.State) {
 	loadStateFromStore = true
 	for i := 0; i <= 3; i++ {
 		if cs.state.LastBlockHeight - int64(i) > 0 {
-			cs.GetRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
+			cs.getRoundStateAtHeight(cs.state.LastBlockHeight - int64(i))
 		}
 	}
 	loadStateFromStore = false
-	// rs := cs.GetRoundStateAtHeight(state.LastBlockHeight + 1)
-	// rs.LastCommit = lastPrecommits
 }
 
 // Updates ConsensusState and increments height to match that of state.
@@ -653,7 +635,7 @@ func (cs *ConsensusState) updateToState(state sm.State) {
 }
 
 func (cs *ConsensusState) RoundStateEvent(height int64) types.EventDataRoundState {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	return rs.RoundStateEvent()
 }
 
@@ -798,8 +780,8 @@ func (cs *ConsensusState) startHandleRoutine(index int) {
 
 // state transitions on complete-proposal, 2/3-any, 2/3-one
 func (cs *ConsensusState) handleMsg(mi msgInfo) {
-	// cs.mtx.Lock()
-	// defer cs.mtx.Unlock()
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
 
 	var err error
 	msg, peerKey := mi.Msg, mi.PeerKey
@@ -841,11 +823,11 @@ func (cs *ConsensusState) handleMsg(mi msgInfo) {
 func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 	cs.Logger.Debug("Received tock", "timeout", ti.Duration, "height", ti.Height, "round", ti.Round, "step", ti.Step)
 
-	// cs.mtx.Lock()
-	// defer cs.mtx.Unlock()
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
 
 	// timeouts must be for current height, round, step
-	rs := cs.GetRoundStateAtHeight(ti.Height)
+	rs := cs.getRoundStateAtHeight(ti.Height)
 	if ti.Height != rs.Height || ti.Round < rs.Round {
 		cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round)
 		return
@@ -878,14 +860,11 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 		}
 	case cstypes.RoundStepPrecommitWait:
 		// rollback the pipeline
-		cs.commitMtx.Lock()
-		rs = cs.GetRoundStateAtHeight(ti.Height)
+		rs = cs.getRoundStateAtHeight(ti.Height)
 		if rs.Step >= cstypes.RoundStepWaitToCommit {
 			cs.Logger.Debug("Ignoring RoundStepPrecommitWait because we're ahead", "height", rs.Height, "round", rs.Round, "step", rs.Step)
-			cs.commitMtx.Unlock()
 			return
 		}
-		cs.commitMtx.Unlock()
 		cs.eventBus.PublishEventTimeoutWait(cs.RoundStateEvent(ti.Height))
 		cs.resetRoundState(ti.Height, ti.Round)
 		cs.startNewRound(ti.Height, ti.Round)
@@ -903,7 +882,7 @@ func (cs *ConsensusState) handleTxsAvailable(height int64) {
 }
 
 func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	// if get all ptx with raw tx, build ProposalBlock with raw tx
 	if (rs.ProposalCMPCTBlock != nil) {
 		txs := make([]types.Tx, 0, len(rs.ProposalCMPCTBlock.Txs))
@@ -942,7 +921,7 @@ func (cs *ConsensusState) handleBuildProposalBlock(height int64) {
 	if disablePtx || (broadcastPtxHash && buildFullBlock) {
 		cs.buildFullBlockFromCMPCTBlock(height)
 	} else {
-		rs := cs.GetRoundStateAtHeight(height)
+		rs := cs.getRoundStateAtHeight(height)
 		if (rs.ProposalCMPCTBlock != nil) {
 			rs.ProposalBlock = rs.ProposalCMPCTBlock
 			rs.ProposalBlockParts = rs.ProposalCMPCTBlockParts
@@ -969,7 +948,7 @@ func (cs* ConsensusState) notifyStateTransition(height int64, typ cstypes.RoundS
 }
 
 func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundStepType) error {
-	rs := cs.GetRoundStateAtHeight(height + 1)
+	rs := cs.getRoundStateAtHeight(height + 1)
 	cs.Logger.Debug(cmn.Fmt("handleStateTransition height %v type %v next height %v step %v", height, typ, rs.Height, rs.Step))
 	if typ == cstypes.RoundStepCommit {
 		if rs.Step == cstypes.RoundStepWaitToPropose {
@@ -1014,10 +993,8 @@ func (cs *ConsensusState) handleStateTransition(height int64, typ cstypes.RoundS
 // Enter: +2/3 prevotes any or +2/3 precommits for block or any from (height, round)
 // NOTE: cs.StartTime was already set for height.
 func (cs *ConsensusState) enterNewRound(height int64, round int) {
-	cs.resetStateMtx.Lock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && rs.Step != cstypes.RoundStepNewHeight) {
-		cs.resetStateMtx.Unlock()
 		cs.Logger.Debug(cmn.Fmt("enterNewRound(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
 	}
@@ -1044,13 +1021,11 @@ func (cs *ConsensusState) enterNewRound(height int64, round int) {
 		// and meanwhile we might have received a proposal
 		// for round 0.
 	} else {
-		rs.RWMtx.Lock()
 		rs.Proposal = nil
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = nil
 		rs.ProposalCMPCTBlock = nil
 		rs.ProposalCMPCTBlockParts = nil
-		rs.RWMtx.Unlock()
 	}
 	rs.Votes.SetRound(round + 1) // also track next round (round+1) to allow round-skipping
 
@@ -1064,11 +1039,8 @@ func (cs *ConsensusState) enterNewRound(height int64, round int) {
 		if cs.config.CreateEmptyBlocksInterval > 0 {
 			cs.scheduleTimeout(cs.config.EmptyBlocksInterval(), height, round, cstypes.RoundStepNewRound)
 		}
-		cs.resetStateMtx.Unlock()
 		go cs.proposalHeartbeat(height, round)
 	} else {
-		cs.resetStateMtx.Unlock()
-		// Enter propose may enterPrevote which use resetStateMtx
 		cs.enterPropose(height, round)
 	}
 }
@@ -1118,7 +1090,7 @@ func (cs *ConsensusState) proposalHeartbeat(height int64, round int) {
 // Enter (CreateEmptyBlocks, CreateEmptyBlocksInterval > 0 ): after enterNewRound(height,round), after timeout of CreateEmptyBlocksInterval
 // Enter (!CreateEmptyBlocks) : after enterNewRound(height,round), once txs are in the mempool
 func (cs *ConsensusState) enterPropose(height int64, round int) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPropose <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPropose(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
@@ -1185,7 +1157,7 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 		return true
 	}
 
-	preRs := cs.GetRoundStateAtHeight(height - 1)
+	preRs := cs.getRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepPrevote {
 		cs.Logger.Debug("Can't enter propose: preRs.Step < RoundStepPrevote", "height", height, "round", round, "preRs.Step", preRs.Step)
 		return false
@@ -1199,7 +1171,7 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 
 	// Reached new height timeout?
 	if !cs.config.PipelineNonstop() {
-		rs := cs.GetRoundStateAtHeight(height)
+		rs := cs.getRoundStateAtHeight(height)
 		if !rs.timeout[cstypes.RoundStepNewHeight] {
 			cs.Logger.Debug("Can't enter propose: !rs.timeout[cstypes.RoundStepNewHeight]", "height", height, "round", round)
 			return false
@@ -1220,9 +1192,9 @@ func (cs *ConsensusState) isProposer(height int64, round int) bool {
 	rsValidators := cs.state.Validators
 	// Use height-4 validators
 	if height <= 4 {
-		rsValidators = cs.GetRoundStateAtHeight(0).state.Validators
+		rsValidators = cs.getRoundStateAtHeight(0).state.Validators
 	} else {
-		rsValidators = cs.GetRoundStateAtHeight(height-4).state.Validators
+		rsValidators = cs.getRoundStateAtHeight(height-4).state.Validators
 	}
 	return bytes.Equal(rsValidators.GetProposerAtHeight(height, round).Address, cs.privValidator.GetAddress())
 }
@@ -1246,7 +1218,7 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 	var blockParts, cmpctBlockParts *types.PartSet
 
 	// Decide on block
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if rs.LockedBlock != nil {
 		// If we're locked onto a block, just choose that.
 		block, blockParts = rs.LockedBlock, rs.LockedBlockParts
@@ -1297,7 +1269,7 @@ func (cs *ConsensusState) defaultDecideProposal(height int64, round int) {
 // Returns true if the proposal block is complete &&
 // (if POLRound was proposed, we have +2/3 prevotes from there).
 func (cs *ConsensusState) isProposalComplete(height int64) bool {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	return rs.IsProposalComplete()
 }
 
@@ -1307,7 +1279,7 @@ func (cs *ConsensusState) getB4State(height int64) sm.State {
 		b4Height = height - 4
 	}
 
-	return cs.GetRoundStateAtHeight(b4Height).state
+	return cs.getRoundStateAtHeight(b4Height).state
 }
 
 // Create the next block to propose and return it.
@@ -1316,13 +1288,13 @@ func (cs *ConsensusState) getB4State(height int64) sm.State {
 func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block, blockParts *types.PartSet,
 		cmpctBlock *types.Block, cmpctBlockParts *types.PartSet) {
 	var commit *types.Commit
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if rs.Height <= 4 {
 		// We're creating a proposal for the first block.
 		// The commit is empty, but not nil.
 		commit = &types.Commit{}
 	} else {
-		ancestorRs := cs.GetRoundStateAtHeight(height - 4)
+		ancestorRs := cs.getRoundStateAtHeight(height - 4)
 		lastCommit := ancestorRs.Votes.Precommits(ancestorRs.CommitRound)
 		if lastCommit.HasTwoThirdsMajority() {
 			// Make the commit from LastCommit
@@ -1359,12 +1331,12 @@ func (cs *ConsensusState) createProposalBlock(height int64) (block *types.Block,
 }
 
 func (cs *ConsensusState) setStepTimeout(height int64, step cstypes.RoundStepType) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	rs.timeout[step] = true
 }
 
 func (cs *ConsensusState) isStepTimeout(height int64, step cstypes.RoundStepType) bool {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	to, ok := rs.timeout[step]
 	return (ok && to)
 }
@@ -1375,9 +1347,7 @@ func (cs *ConsensusState) isStepTimeout(height int64, step cstypes.RoundStepType
 // Prevote for LockedBlock if we're locked, or ProposalBlock if valid.
 // Otherwise vote nil.
 func (cs *ConsensusState) enterPrevote(height int64, round int) {
-	cs.resetStateMtx.Lock()
-	defer cs.resetStateMtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrevote <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrevote(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
@@ -1423,7 +1393,7 @@ func (cs *ConsensusState) canEnterPrevote(height int64, round int) bool {
 		return true
 	}
 
-	preRs := cs.GetRoundStateAtHeight(height - 1)
+	preRs := cs.getRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepPrecommit {
 		cs.Logger.Debug("Can't enter prevote: preRs.Step < RoundStepPrecommit", "height", height, "round", round, "preRs.Step", preRs.Step)
 		return false
@@ -1452,7 +1422,7 @@ func (cs *ConsensusState) enterWaitToPrevote(height int64, round int) {
 func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 	logger := cs.Logger.With("height", height, "round", round)
 	// If a block is locked, prevote that.
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if rs.LockedBlock != nil {
 		logger.Info("enterPrevote: Block was locked")
 		cs.signAddVote(rs, types.VoteTypePrevote, rs.LockedBlock.Hash(), rs.LockedBlockParts.Header(),
@@ -1487,9 +1457,7 @@ func (cs *ConsensusState) defaultDoPrevote(height int64, round int) {
 
 // Enter: any +2/3 prevotes at next round.
 func (cs *ConsensusState) enterPrevoteWait(height int64, round int) {
-	cs.resetStateMtx.Lock()
-	defer cs.resetStateMtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrevoteWait <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrevoteWait(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
@@ -1517,9 +1485,7 @@ func (cs *ConsensusState) enterPrevoteWait(height int64, round int) {
 // else, unlock an existing lock and precommit nil if +2/3 of prevotes were nil,
 // else, precommit nil otherwise.
 func (cs *ConsensusState) enterPrecommit(height int64, round int) {
-	cs.precommitMtx.Lock()
-	defer cs.precommitMtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommit <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
@@ -1641,7 +1607,7 @@ func (cs *ConsensusState) canEnterPrecommit(height int64, round int) bool {
 		return true
 	}
 
-	preRs := cs.GetRoundStateAtHeight(height - 1)
+	preRs := cs.getRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepCommit {
 		cs.Logger.Debug("Can't enter precommit: preRs.Step < RoundStepCommit", "height", height, "round", round, "preRs.Step", preRs.Step)
 		return false
@@ -1652,7 +1618,7 @@ func (cs *ConsensusState) canEnterPrecommit(height int64, round int) bool {
 		return true
 	}
 
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if rs.Votes.Prevotes(round).HasTwoThirdsAny() {
 		cs.Logger.Debug("Can enter precommit: got +2/3 votes")
 		return true
@@ -1670,7 +1636,7 @@ func (cs *ConsensusState) enterWaitToPrecommit(height int64, round int) {
 
 // Enter: any +2/3 precommits for next round.
 func (cs *ConsensusState) enterPrecommitWait(height int64, round int) {
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if round < rs.Round || (rs.Round == round && cstypes.RoundStepPrecommitWait <= rs.Step) {
 		cs.Logger.Debug(cmn.Fmt("enterPrecommitWait(%v/%v): Invalid args. Current step: %v/%v/%v", height, round, rs.Height, rs.Round, rs.Step))
 		return
@@ -1693,9 +1659,7 @@ func (cs *ConsensusState) enterPrecommitWait(height int64, round int) {
 
 // Enter: +2/3 precommits for block
 func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
-	cs.commitMtx.Lock()
-	defer cs.commitMtx.Unlock()
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if cstypes.RoundStepCommit <= rs.Step {
 		cs.Logger.Debug(cmn.Fmt("enterCommit(%v/%v): Invalid args. Current step: %v/%v/%v", height, commitRound, rs.Height, rs.Round, rs.Step))
 		return
@@ -1717,9 +1681,6 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 
 			// Maybe finalize immediately.
 			cs.tryFinalizeCommit(height)
-
-			// Notify next height to move forward
-			cs.notifyStateTransition(height, cstypes.RoundStepCommit)
 		}
 	}()
 
@@ -1775,7 +1736,7 @@ func (cs *ConsensusState) canEnterCommit(height int64, round int) bool {
 	// No need to handle timeout here,
 	// since precommit timeout will lead to pipeline rollback
 
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 
 	if !rs.Votes.Precommits(round).HasTwoThirdsMajority() {
 		cs.Logger.Debug("Can't enter commit: not reached +2/3 majority")
@@ -1798,7 +1759,7 @@ func (cs *ConsensusState) tryFinalizeCommit(height int64) {
 	// 	cmn.PanicSanity(cmn.Fmt("tryFinalizeCommit() cs.Height: %v vs height: %v", cs.Height, height))
 	// }
 
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	blockID, ok := rs.Votes.Precommits(rs.CommitRound).TwoThirdsMajority()
 	if !ok || len(blockID.Hash) == 0 {
 		cs.Logger.Error("Attempt to finalize failed. There was no +2/3 majority, or +2/3 was for <nil>.", "height", height)
@@ -1812,17 +1773,18 @@ func (cs *ConsensusState) tryFinalizeCommit(height int64) {
 	}
 
 	//	go
-	cs.finalizeCommit(height)
+	go cs.finalizeCommit(height)
 }
 
 // Increment height and goto cstypes.RoundStepNewHeight
+// Only need to acquire cs.mtx when updating round states
 func (cs *ConsensusState) finalizeCommit(height int64) {
 	// if cs.Height != height || cs.Step != cstypes.RoundStepCommit {
 	// 	cs.Logger.Debug(cmn.Fmt("finalizeCommit(%v): Invalid args. Current step: %v/%v/%v", height, cs.Height, cs.Round, cs.Step))
 	// 	return
 	// }
 
-	rs := cs.GetRoundStateAtHeight(height)
+	rs := cs.getRoundStateAtHeight(height)
 	if rs.Step != cstypes.RoundStepCommit {
 		cs.Logger.Debug(cmn.Fmt("finalizeCommit(%v): Invalid args. Current step: %v/%v/%v", height, rs.Height, rs.Round, rs.Step))
 		return
@@ -1900,6 +1862,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
+	cs.mtx.Lock()
 	// stop round state timer
 	rs.timeoutTicker.Stop()
 
@@ -1910,7 +1873,8 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
-	cs.scheduleRound0(cs.GetRoundStateAtHeight(height + 4))
+	cs.scheduleRound0(cs.getRoundStateAtHeight(height + 4))
+	cs.mtx.Unlock()
 
 	// By here,
 	// * cs.Height has been increment to height+1
@@ -1918,12 +1882,12 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// * cs.StartTime is set to when we will start round0.
 
 	types.RccommitOver(height)
+
+	// Notify next height to move forward
+	cs.notifyStateTransition(height, cstypes.RoundStepCommit)
 }
 
 func (cs *ConsensusState) truncateRoundStates() {
-	cs.mtx.Lock()
-	defer cs.mtx.Unlock()
-
 	currentHeight := cs.state.LastBlockHeight
 	maxLen := int64(8)
 
@@ -1939,7 +1903,7 @@ func (cs *ConsensusState) truncateRoundStates() {
 func (cs *ConsensusState) defaultSetProposal(proposal *types.Proposal, force bool) error {
 	// Already have one
 	// TODO: possibly catch double proposals
-	rs := cs.GetRoundStateAtHeight(proposal.Height)
+	rs := cs.getRoundStateAtHeight(proposal.Height)
 	if !force && rs.Proposal != nil {
 		return nil
 	}
@@ -1994,7 +1958,6 @@ func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 // NOTE: block is not necessarily valid.
 // Asynchronously triggers either enterPrevote (before we timeout of propose) or tryFinalizeCommit, once we have the full block.
 func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
-	cs.mtx.Lock()
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
@@ -2004,18 +1967,14 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 	// We're not expecting a block part.
 	if rs.ProposalBlockParts == nil {
-		cs.mtx.Unlock()
 		return false, nil // TODO: bad peer? Return error?
 	}
+
 	added, err = rs.ProposalBlockParts.AddPart(part, verify)
 	if err != nil {
-		cs.mtx.Unlock()
 		return added, err
 	}
-	cs.mtx.Unlock()
-	if rs.ProposalBlockParts == nil {
-		return false, nil // TODO: bad peer? Return error?
-	}
+
 	if added && rs.ProposalBlockParts.IsComplete() {
 		// Added and completed!
 		var n int
@@ -2045,8 +2004,6 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 
 // NOTE: block is not necessarily valid.
 func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
-	cs.mtx.Lock()
-
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
@@ -2060,18 +2017,13 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	// added, err = cs.ProposalBlockParts.AddPart(part, verify)
 	// We're not expecting a block part.
 	if rs.ProposalCMPCTBlockParts == nil {
-		cs.mtx.Unlock()
 		return false, nil // TODO: bad peer? Return error?
 	}
 	added, err = rs.ProposalCMPCTBlockParts.AddPart(part, verify)
 	if err != nil {
-		cs.mtx.Unlock()
 		return added, err
 	}
-	cs.mtx.Unlock()
-	if rs.ProposalCMPCTBlockParts == nil {
-		return false, nil // TODO: bad peer? Return error?
-	}
+
 	if added && rs.ProposalCMPCTBlockParts.IsComplete() {
 		types.RcreceiveBlock(height)
 		// Added and completed!
@@ -2159,7 +2111,7 @@ func (cs *ConsensusState) tryAddVote(vote *types.Vote, peerKey string) error {
 func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool, err error) {
 	cs.Logger.Debug("addVote", "voteHeight", vote.Height, "voteRound", vote.Round, "voteType", vote.Type, "valIndex", vote.ValidatorIndex)
 
-	rs := cs.GetRoundStateAtHeight(vote.Height)
+	rs := cs.getRoundStateAtHeight(vote.Height)
 	// TODO: should consider below scenario?
 	// A precommit for the previous height?
 	// These come in while we wait timeoutCommit
@@ -2309,7 +2261,7 @@ func (cs *ConsensusState) signAddVote(rs *RoundStateWrapper, type_ byte,
 }
 
 func (cs *ConsensusState) StringIndented(indent string) string {
-	rs := cs.GetRoundStateAtHeight(cs.state.LastBlockHeight)
+	rs := cs.getRoundStateAtHeight(cs.state.LastBlockHeight)
 	return rs.StringIndented(indent)
 }
 

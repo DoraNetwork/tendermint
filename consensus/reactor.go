@@ -516,9 +516,6 @@ func (conR *ConsensusReactor) pushProposal(rs *cstypes.RoundState, prs *cstypes.
 		return false
 	}
 
-	rs.RWMtx.RLock()
-	defer rs.RWMtx.RUnlock()
-
 	if (rs.Round == prs.Round) && (rs.Proposal != nil && !prs.Proposal) {
 		// Proposal: share the proposal metadata with peer.
 		{
@@ -551,8 +548,6 @@ func (conR *ConsensusReactor) pushProposalBlockParts(rs *cstypes.RoundState, prs
 	peer p2p.Peer, ps *PeerState, logger log.Logger) bool {
 	heightLogger := logger.With("height", prs.Height)
 	if rs != nil {
-		rs.RWMtx.RLock()
-		defer rs.RWMtx.RUnlock()
 		if prs.ProposalBlockParts == nil && rs.Proposal != nil {
 			ps.InitProposalBlockParts(prs.Height, rs.Proposal.BlockPartsHeader)
 			// continue the loop since prs is a copy and not effected by this initialization
@@ -790,9 +785,6 @@ OUTER_LOOP:
 }
 
 func (conR *ConsensusReactor) gossipVotesForHeight(logger log.Logger, rs *cstypes.RoundState, prs *cstypes.PeerRoundState, ps *PeerState) bool {
-	rs.RWMtx.RLock()
-	defer rs.RWMtx.RUnlock()
-
 	// If there are lastCommits to send...
 	if prs.Step == cstypes.RoundStepNewHeight {
 		if ps.PickSendVote(rs.LastCommit) {
@@ -845,9 +837,7 @@ OUTER_LOOP:
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
 			if rs.Height == prs.Height {
-				rs.RWMtx.RLock()
 				maj23, ok := rs.Votes.Prevotes(prs.Round).TwoThirdsMajority()
-				rs.RWMtx.RUnlock()
 				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
@@ -865,9 +855,7 @@ OUTER_LOOP:
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
 			if rs.Height == prs.Height {
-				rs.RWMtx.RLock()
 				maj23, ok := rs.Votes.Precommits(prs.Round).TwoThirdsMajority()
-				rs.RWMtx.RUnlock()
 				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
@@ -885,9 +873,7 @@ OUTER_LOOP:
 			rs := conR.conS.GetRoundState()
 			prs := ps.GetRoundState()
 			if rs.Height == prs.Height && prs.ProposalPOLRound >= 0 {
-				rs.RWMtx.RLock()
 				maj23, ok := rs.Votes.Prevotes(prs.ProposalPOLRound).TwoThirdsMajority()
-				rs.RWMtx.RUnlock()
 				if ok {
 					peer.TrySend(StateChannel, struct{ ConsensusMessage }{&VoteSetMaj23Message{
 						Height:  prs.Height,
