@@ -827,7 +827,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	if disablePtx {
 		if compactBlock {
 			removedTxsHash := make([]*mempoolTx, 0, mem.txsHash.Len())
-			e := mem.txsHash.Front()
 			for _, txHash := range txs {
 				if (len(txHash) != 32) {
 					// Disable log as fast sync tx is raw tx
@@ -851,7 +850,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 					}
 				}
 				// remove from txHash
-				for ; e != nil; e = e.Next() {
+				for e := mem.txsHash.Front(); e != nil; e = e.Next() {
 					memTx := e.Value.(*mempoolTx)
 					if bytes.Compare(txHash, memTx.tx) == 0 {
 						mem.txsHash.Remove(e)
@@ -1008,6 +1007,7 @@ func (mem *Mempool) Restore(height int64) {
 			for i := 0; i < size; i++ {
 				mem.txs.PushBack(txs[i])
 			}
+			delete(mem.uncommittedTxs, height)
 		}
 	} else if usePtxHash {
 		if txs, ok := mem.uncommittedPtxsHash[height]; ok {
