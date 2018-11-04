@@ -1166,7 +1166,23 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 	// Previous height's proposal not available, wait
 	if !preRs.IsProposalComplete() {
 		cs.Logger.Debug("Can't enter propose: !preRs.IsProposalComplete()", "height", height, "round", round)
-		return false
+		if preRs.Proposal == nil {
+			cs.Logger.Debug("Proposal is nil")
+		} else {
+			if preRs.Proposal.POLRound >= 0 {
+				cs.Logger.Debug("Proposal POLRound is", preRs.Proposal.POLRound)
+				cs.Logger.Debug("POLRound majority", preRs.Votes.Prevotes(preRs.Proposal.POLRound).HasTwoThirdsMajority())
+				cs.Logger.Debug("rsRound majority", preRs.Votes.Prevotes(preRs.Round).HasTwoThirdsMajority())
+			}
+		}
+		if preRs.ProposalBlock == nil {
+			cs.Logger.Debug("ProposalBlock is nil")
+		}
+		if preRs.Proposal == nil && preRs.ProposalBlock != nil && preRs.Step == cstypes.RoundStepCommit {
+			cs.Logger.Debug("Although Proposal is nil but committed, consider it as proposal complete")
+		} else {
+			return false
+		}
 	}
 
 	// Reached new height timeout?
@@ -1588,10 +1604,10 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs.LockedBlockParts = nil
 
 	if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
-		cs.Logger.Debug("Dont received committed block, reset ProposalBlockParts to let peer gossip data")
+		cs.Logger.Debug("Havent received committed block, reset ProposalBlockParts to let peer gossip data")
 		CMPCTBlockID, ok := rs.Votes.Prevotes(round).GetCMPCTBlockMaj23()
 		if compactBlock && !ok {
-			cs.Logger.Error("Dont get cmpct block maj23 in precommit, this may not happen")
+			cmn.PanicSanity(cmn.Fmt("Havent get cmpct block maj23 in precommit, this may not happen"))
 		}
 		rs.ProposalBlock = nil
 		rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
@@ -1711,7 +1727,7 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 			// Set up ProposalBlockParts and keep waiting.
 			CMPCTBlockID, ok := rs.Votes.Precommits(commitRound).GetCMPCTBlockMaj23()
 			if compactBlock && !ok {
-				cs.Logger.Error("Dont get cmpct block maj23, this may not happen")
+				cmn.PanicSanity(cmn.Fmt("Havent get cmpct block maj23, this may not happen"))
 			}
 			rs.ProposalBlock = nil
 			rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
