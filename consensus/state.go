@@ -1298,6 +1298,13 @@ func (cs *ConsensusState) getB4State(height int64) sm.State {
 	return cs.getRoundStateAtHeight(b4Height).state
 }
 
+func (cs *ConsensusState) GetB4State(height int64) sm.State {
+	cs.mtx.Lock()
+	defer cs.mtx.Unlock()
+
+	return cs.getB4State(height)
+}
+
 // Create the next block to propose and return it.
 // Returns nil block upon error.
 // NOTE: keep it side-effect free for clarity.
@@ -1818,7 +1825,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	if !block.HashesTo(blockID.Hash) {
 		cmn.PanicSanity(cmn.Fmt("Cannot finalizeCommit, ProposalBlock does not hash to commit hash"))
 	}
-	rsB4 := cs.getB4State(height)
+	rsB4 := cs.GetB4State(height)
 	if err := cs.blockExec.ValidateBlock(rsB4, block); err != nil {
 		cmn.PanicConsensus(cmn.Fmt("+2/3 committed an invalid block: %v", err))
 	}
