@@ -1006,8 +1006,11 @@ func (mem *Mempool) Restore(height int64) {
 			size := len(txs)
 			for i := 0; i < size; i++ {
 				mem.txs.PushBack(txs[i])
+				mem.txsHash.PushBack(txs[i].tx)
 			}
 			delete(mem.uncommittedTxs, height)
+			delete(mem.uncommittedTxsHash, height)
+			delete(mem.pendingBlockTxs, height)
 		}
 	} else if usePtxHash {
 		if txs, ok := mem.uncommittedPtxsHash[height]; ok {
@@ -1015,6 +1018,9 @@ func (mem *Mempool) Restore(height int64) {
 			for i := 0; i < size; i++ {
 				mem.ptxsHash.PushBack(txs[i])
 			}
+			delete(mem.uncommittedTxs, height)
+			delete(mem.uncommittedTxsHash, height)
+			delete(mem.pendingBlockTxs, height)
 		}
 	} else {
 		if txs, ok := mem.uncommittedPtxs[height]; ok {
@@ -1022,6 +1028,9 @@ func (mem *Mempool) Restore(height int64) {
 			for i := 0; i < size; i++ {
 				mem.ptxs.PushBack(txs[i])
 			}
+			delete(mem.uncommittedTxs, height)
+			delete(mem.uncommittedTxsHash, height)
+			delete(mem.pendingBlockTxs, height)
 		}
 	}
 }
