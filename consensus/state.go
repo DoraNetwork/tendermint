@@ -1800,7 +1800,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// 	return
 	// }
 
-	rs := cs.getRoundStateAtHeight(height)
+	rs := cs.GetRoundStateAtHeight(height)
 	if rs.Step != cstypes.RoundStepCommit {
 		cs.Logger.Debug(cmn.Fmt("finalizeCommit(%v): Invalid args. Current step: %v/%v/%v", height, rs.Height, rs.Round, rs.Step))
 		return
