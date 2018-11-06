@@ -1157,6 +1157,11 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 		return true
 	}
 
+	if height > cs.state.LastBlockHeight + 4 {
+		cs.Logger.Debug("Can't enter propose: height < cs.state.LastBlockHeight+4", "height", height, "round", round, "LastBlockHeight", cs.state.LastBlockHeight)
+		return false
+	}
+
 	preRs := cs.getRoundStateAtHeight(height - 1)
 	if preRs.Step < cstypes.RoundStepPrevote {
 		cs.Logger.Debug("Can't enter propose: preRs.Step < RoundStepPrevote", "height", height, "round", round, "preRs.Step", preRs.Step)
