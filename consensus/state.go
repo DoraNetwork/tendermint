@@ -828,8 +828,8 @@ func (cs *ConsensusState) handleTimeout(ti timeoutInfo) {
 
 	// timeouts must be for current height, round, step
 	rs := cs.getRoundStateAtHeight(ti.Height)
-	if ti.Height != rs.Height || ti.Round < rs.Round {
-		cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round)
+	if ti.Height != rs.Height || ti.Round < rs.Round || rs.Step >= cstypes.RoundStepWaitToCommit{
+		cs.Logger.Debug("Ignoring tock because we're ahead", "height", rs.Height, "round", rs.Round, "Step", rs.Step)
 		return
 	}
 
@@ -1897,6 +1897,13 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
 	cs.scheduleRound0(cs.getRoundStateAtHeight(height + 4))
+
+	if rs.Round != rs.CommitRound {
+		// reset Round to CommitRound fix rollback issue
+		cs.Logger.Info("Height", height, "reset round", rs.Round, "to commit round", rs.CommitRound)
+		rs.Round = rs.CommitRound
+		rs.Step = cstypes.RoundStepCommit
+	}
 	cs.mtx.Unlock()
 
 	// By here,
