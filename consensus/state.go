@@ -242,7 +242,9 @@ func (cs *ConsensusState) startNewRound(height int64, round int) {
 	cs.setStepTimeout(height, cstypes.RoundStepNewHeight)
 	cs.enterNewRound(height, round+1)
 	for i := 1; i <= 3; i++ {
-		cs.scheduleRound0(cs.getRoundStateAtHeight(height + int64(i)))
+		rs := cs.getRoundStateAtHeight(height + int64(i))
+		rs.StartTime = cs.config.Commit(time.Now(), i)
+		cs.scheduleRound0(rs)
 	}
 }
 
@@ -297,7 +299,6 @@ func (cs *ConsensusState) getRoundStateAtHeight(height int64) *RoundStateWrapper
 				Height: height,
 				Round: 0,
 				Step: cstypes.RoundStepNewHeight,
-				StartTime: cs.config.Commit(time.Now()),
 				CommitRound: -1,
 			},
 			timeoutTicker: NewTimeoutTicker(),
@@ -439,7 +440,9 @@ func (cs *ConsensusState) OnStart() error {
 	initialHeight = cs.state.LastBlockHeight + 1
 
 	for i := 1; i <= 4; i++ {
-		cs.scheduleRound0(cs.getRoundStateAtHeight(cs.state.LastBlockHeight + int64(i)))
+		rs := cs.getRoundStateAtHeight(cs.state.LastBlockHeight + int64(i))
+		rs.StartTime = cs.config.Commit(time.Now(), i)
+		cs.scheduleRound0(rs)
 	}
 
 
@@ -1906,7 +1909,6 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	// cs.StartTime is already set.
 	// Schedule Round0 to start soon.
-	cs.scheduleRound0(cs.getRoundStateAtHeight(height + 4))
 
 	if rs.Round != rs.CommitRound {
 		// reset Round to CommitRound fix rollback issue
@@ -1914,6 +1916,11 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 		rs.Round = rs.CommitRound
 		rs.Step = cstypes.RoundStepCommit
 	}
+
+	rsN4 := cs.getRoundStateAtHeight(height + 4)
+	// default start time is rsB4 StartTime + TimeoutCommit
+	rsN4.StartTime = cs.config.Commit(rs.CommitTime, 4)
+	cs.scheduleRound0(rsN4)
 	cs.mtx.Unlock()
 
 	// By here,

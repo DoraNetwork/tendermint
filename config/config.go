@@ -353,8 +353,8 @@ func (cfg *ConsensusConfig) Precommit(round int) time.Duration {
 }
 
 // Commit returns the amount of time to wait for straggler votes after receiving +2/3 precommits for a single block (ie. a commit).
-func (cfg *ConsensusConfig) Commit(t time.Time) time.Time {
-	return t.Add(time.Duration(cfg.TimeoutCommit) * time.Millisecond)
+func (cfg *ConsensusConfig) Commit(t time.Time, count int) time.Time {
+	return t.Add(time.Duration(cfg.TimeoutCommit * count) * time.Millisecond)
 }
 
 // PeerGossipSleep returns the amount of time to sleep if there is nothing to send from the ConsensusReactor
