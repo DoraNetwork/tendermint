@@ -778,13 +778,23 @@ OUTER_LOOP:
 					continue
 				}
 				Lastcommit := (*types.Commit)(nil)
-				if selfRs != nil {
-					Lastcommit = selfRs.Votes.Precommits(selfRs.CommitRound).MakeCommit()
+				if selfRs != nil && selfRs.Votes != nil {
+					precommits := selfRs.Votes.Precommits(selfRs.CommitRound)
+					if precommits != nil && precommits.IsCommit() {
+						Lastcommit = precommits.MakeCommit()
+					} else {
+						// votes are not in cache, load from commit
+						if i <= conR.conS.blockStore.Height() {
+							Lastcommit = conR.conS.LoadCommit(i)
+						}
+					}
 				} else {
 					// votes are not in cache, load from commit
-					Lastcommit = conR.conS.LoadCommit(i)
+					if i <= conR.conS.blockStore.Height() {
+						Lastcommit = conR.conS.LoadCommit(i)
+					}
 				}
-				if ps.PickSendVote(Lastcommit) {
+				if Lastcommit != nil && ps.PickSendVote(Lastcommit) {
 					logger.Debug("Picked Catchup last commit to send", "height", i)
 					continue OUTER_LOOP
 				}
