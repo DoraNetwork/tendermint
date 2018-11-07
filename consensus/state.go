@@ -1885,12 +1885,12 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
+	cs.mtx.Lock()
 	// NewHeightStep!
 	cs.updateToState(stateCopy)
 
 	fail.Fail() // XXX
 
-	cs.mtx.Lock()
 	// stop round state timer
 	rs.timeoutTicker.Stop()
 
