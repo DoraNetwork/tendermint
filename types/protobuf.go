@@ -10,7 +10,7 @@ var TM2PB = tm2pb{}
 
 type tm2pb struct{}
 
-func (tm2pb) Header(header *Header) *types.Header {
+func (tm2pb) Header(header *Header, proposer []byte) *types.Header {
 	return &types.Header{
 		ChainID:        header.ChainID,
 		Height:         header.Height,
@@ -21,6 +21,7 @@ func (tm2pb) Header(header *Header) *types.Header {
 		DataHash:       header.DataHash,
 		AppHash:        header.AppHash,
 		Random:         TM2PB.Random(header.Random),
+		Proposer:       proposer,
 	}
 }
 

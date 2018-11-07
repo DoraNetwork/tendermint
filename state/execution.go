@@ -219,10 +219,16 @@ func execBlockOnProxyApp(
 
 	commitInfo, byzVals := getBeginBlockValidatorInfo(block, valSet, stateDB)
 
+	proposerAddr := []byte{}
+	proposer := valSet.GetProposer()
+	if proposer != nil {
+		proposerAddr = proposer.Address
+	}
+
 	// Begin block
 	_, err := proxyAppConn.BeginBlockSync(abci.RequestBeginBlock{
 		Hash:                block.Hash(),
-		Header:              types.TM2PB.Header(block.Header),
+		Header:              types.TM2PB.Header(block.Header, proposerAddr),
 		LastCommitInfo:      commitInfo,
 		ByzantineValidators: byzVals,
 	})
