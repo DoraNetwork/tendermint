@@ -230,6 +230,11 @@ func (cs *ConsensusState) updateRoundStateAtHeight(height int64) {
 	if _, ok := cs.roundStates[height]; ok {
 		cs.roundStates[height].state = cs.state.Copy()
 		cs.roundStates[height].Validators = cs.roundStates[height].state.Validators
+		// update height+4 round state if exists (initialized before finalizing commit)
+		if _, ok := cs.roundStates[height+4]; ok {
+			cs.roundStates[height+4].state = cs.state.Copy()
+			cs.roundStates[height+4].Validators = cs.roundStates[height+4].state.Validators
+		}
 	}
 }
 
