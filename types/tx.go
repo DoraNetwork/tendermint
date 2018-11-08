@@ -40,6 +40,12 @@ type ParallelTxHashMessage struct {
 
 type AppTxMessage interface{}
 
+// msgs for request tx from other peer
+type RequestTxMsg struct {
+	Height int64
+	TxHash [][]byte
+}
+
 // var _ = wire.RegisterInterface(
 // 	struct{ AppTxMessage }{},
 // 	wire.ConcreteType{&TxMessage{}, RawTx},

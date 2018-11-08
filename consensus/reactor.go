@@ -87,11 +87,11 @@ func (conR *ConsensusReactor) OnStart() error {
 func (conR *ConsensusReactor) broadcastGetTxRoutine() {
 	for {
 		select {
-		case fetching := <- conR.conS.mempool.TxsFetching():
-			msg := &mempoolR.GetTxMessage{Hash: fetching}
+		case txMsg := <- conR.conS.mempool.TxsFetching():
+			msg := &mempoolR.GetTxMessage{Hash: txMsg.TxHash}
 			for _, peer := range conR.peers {
 				ps := (*peer).Get(types.PeerStateKey).(*PeerState)
-				prs := ps.GetRoundStateAtHeight(conR.conS.cmpctBlockHeight)
+				prs := ps.GetRoundStateAtHeight(txMsg.Height)
 				// send GetTxMessage to have proposalBlock one
 				if prs.ProposalCMPCTBlockParts.IsFull() {
 					conR.Logger.Info("broadcastGetTxRoutine Send GetTxMessage to peer", (*peer).Key())

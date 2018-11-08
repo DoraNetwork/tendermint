@@ -34,8 +34,8 @@ type Mempool interface {
 
 	TxResponsed() <-chan int64
 
-	GetTx(tx []byte, from int32, to int32) (bool, Tx)
-	TxsFetching() <-chan [][]byte
+	GetTx(height int64, tx []byte, from int32, to int32) (bool, Tx)
+	TxsFetching() <-chan RequestTxMsg
 }
 
 // MockMempool is an empty implementation of a Mempool, useful for testing.
@@ -54,8 +54,8 @@ func (m MockMempool) Flush()                                                  {}
 func (m MockMempool) TxsAvailable() <-chan int64                              { return make(chan int64) }
 func (m MockMempool) EnableTxsAvailable()                                     {}
 func (m MockMempool) TxResponsed() <-chan int64                               { return make(chan int64) }
-func (m MockMempool) GetTx(tx []byte, from int32, to int32) (bool, Tx)        { return true, nil }
-func (m MockMempool) TxsFetching() <-chan [][]byte                            { return make(chan [][]byte) }
+func (m MockMempool) GetTx(height int64, tx []byte, from int32, to int32) (bool, Tx)        { return true, nil }
+func (m MockMempool) TxsFetching() <-chan RequestTxMsg                        { return make(chan RequestTxMsg) }
 
 //------------------------------------------------------
 // blockstore

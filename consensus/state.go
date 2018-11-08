@@ -123,9 +123,6 @@ type ConsensusState struct {
 	// for tests where we want to limit the number of transitions the state makes
 	nSteps int
 
-	// for store the height when addProposalCMPCTBlock
-	cmpctBlockHeight int64
-
 	// some functions can be overwritten for testing
 	decideProposal func(height int64, round int)
 	doPrevote      func(height int64, round int)
@@ -259,7 +256,6 @@ func (cs *ConsensusState) resetRoundState(height int64, round int) {
 
 	cs.Logger.Info(cmn.Fmt("resetRoundState(%v/%v):", height, round))
 
-	cs.cmpctBlockHeight = height
 	for h := range cs.roundStates {
 		if h > height {
 			cs.roundStates[h].timeoutTicker.Stop()
@@ -687,10 +683,6 @@ func (cs *ConsensusState) receiveRoutine(maxSteps int) {
 		case height := <-cs.mempool.TxsAvailable():
 			cs.handleTxsAvailable(height)
 		case txHeight := <-cs.mempool.TxResponsed():
-			if txHeight < 0 {
-				cs.Logger.Error("mempool TxResponsed height", txHeight, "abnormal, Use cmpctBlockHeight", cs.cmpctBlockHeight)
-				txHeight = cs.cmpctBlockHeight
-			}
 			cs.handleBuildProposalBlock(txHeight)
 		case mi = <-cs.peerMsgQueue:
 			cs.wal.Save(mi)
@@ -898,10 +890,10 @@ func (cs *ConsensusState) buildFullBlockFromCMPCTBlock(height int64) {
 		for _, tx := range rs.ProposalCMPCTBlock.Txs {
 			// TODO: handle GetTx return nil, which should not happen
 			if disablePtx {
-				_, txTemp := cs.mempool.GetTx(tx, types.RawTxHash, types.RawTx)
+				_, txTemp := cs.mempool.GetTx(height, tx, types.RawTxHash, types.RawTx)
 				txs = append(txs, txTemp)
 			} else if compactBlock {
-				_, ptxTemp := cs.mempool.GetTx(tx, types.ParallelTxHash, types.ParallelTx)
+				_, ptxTemp := cs.mempool.GetTx(height, tx, types.ParallelTxHash, types.ParallelTx)
 				txs = append(txs, ptxTemp)
 			}
 		}
@@ -927,6 +919,7 @@ func (cs *ConsensusState) handleBuildProposalBlock(height int64) {
 	cs.mtx.Lock()
 	defer cs.mtx.Unlock()
 
+	cs.Logger.Info("handleBuildProposalBlock height", height)
 	if disablePtx || (broadcastPtxHash && buildFullBlock) {
 		cs.buildFullBlockFromCMPCTBlock(height)
 	} else {
@@ -2087,7 +2080,6 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		rs.ProposalCMPCTBlock = wire.ReadBinary(&types.Block{}, rs.ProposalCMPCTBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
 		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash())
-		cs.cmpctBlockHeight = height
 		types.RcCMPCTBlock(height, rs.ProposalCMPCTBlock, rs.ProposalCMPCTBlockParts)
 		// assign cmpctblock to block directly
 		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer
@@ -2096,9 +2088,9 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 			for _, tx := range rs.ProposalCMPCTBlock.Txs {
 				missTxs := false
 				if disablePtx {
-					missTxs, _ = cs.mempool.GetTx(tx, types.RawTxHash, types.RawTxHash)
+					missTxs, _ = cs.mempool.GetTx(height, tx, types.RawTxHash, types.RawTxHash)
 				} else if compactBlock {
-					missTxs, _ = cs.mempool.GetTx(tx, types.ParallelTxHash, types.RawTxHash)
+					missTxs, _ = cs.mempool.GetTx(height, tx, types.ParallelTxHash, types.RawTxHash)
 				}
 				if missTxs {
 					missTxBool = true

@@ -100,8 +100,8 @@ type Mempool struct {
 	notifiedTxsAvailable bool            // true if fired on txsAvailable for this height
 	txsAvailable         chan int64      // fires the next height once for each height, when the mempool is not empty
 	TxsAllRequested      chan int64     // all tx requested arrived, used for response of GetTx
-	fetchingTx           [][]byte		 // fetching tx from remote peer
-	requestingTx		 chan [][]byte   // requesting tx from remote peer
+	fetchingTx           map[int64][][]byte		 // fetching tx from remote peer
+	requestingTx		 chan types.RequestTxMsg   // requesting tx from remote peer
 	// Keep a cache of already-seen txs.
 	// This reduces the pressure on the proxyApp.
 	cache *txCache
@@ -117,9 +117,6 @@ type Mempool struct {
 	uncommittedTxsHash   map[int64]([]*mempoolTx)
 	uncommittedPtxs      map[int64](types.Txs)
 	uncommittedPtxsHash  map[int64](types.Txs)
-
-	// Keep track of all transactions in pending blocks
-	pendingBlockTxs      map[int64]TxsMap
 }
 
 
@@ -150,13 +147,12 @@ func NewMempool(config *cfg.MempoolConfig, proxyAppConn proxy.AppConnMempool, he
 		uncommittedTxsHash:  make(map[int64]([]*mempoolTx)),
 		uncommittedPtxs:     make(map[int64](types.Txs)),
 		uncommittedPtxsHash: make(map[int64](types.Txs)),
-		pendingBlockTxs:     make(map[int64]TxsMap),
 	}
 	mempool.initWAL()
-	mempool.fetchingTx = make([][]byte, 0)
+	mempool.fetchingTx = make(map[int64][][]byte, 0)
 	proxyAppConn.SetResponseCallback(mempool.resCb)
 	mempool.TxsAllRequested = make(chan int64, 1)
-	mempool.requestingTx = make(chan [][]byte, 1)
+	mempool.requestingTx = make(chan types.RequestTxMsg, 1)
 
 	testConfig, _ := emtConfig.ParseConfig()
 	if testConfig != nil {
@@ -309,23 +305,17 @@ func (mem *Mempool) TxsFrontWait() *clist.CElement {
 }
 
 // TxsFetching is mempool/reactor to get tx would to fetch
-// TODO: need assign the requsting tx to the send block peer but not random one
-func (mem *Mempool) TxsFetching() <-chan [][]byte {
+func (mem *Mempool) TxsFetching() <-chan types.RequestTxMsg {
 	return mem.requestingTx
 }
 
 // NotifiyFetchingTx is set fetchingTx to chan
-// TODO: avoid chan block when there is no peer read the chan
-func (mem *Mempool) NotifiyFetchingTx(fetchingTxs [][]byte) {
-	if (len(mem.fetchingTx) == 0) {
-		mem.requestingTx <- nil		//clear fetching in mempool/reactor
-	} else {
-		mem.requestingTx <- fetchingTxs
-	}
+func (mem *Mempool) NotifiyFetchingTx(height int64, fetchingTxs [][]byte) {
+	mem.requestingTx <- types.RequestTxMsg{height, fetchingTxs}
 }
 
 // GetTx returns the tx from 'from' type to 'to' type
-func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
+func (mem *Mempool) GetTx(height int64, hash []byte, from int32, to int32) (bool, types.Tx) {
 	mem.proxyMtx.Lock()
 	defer mem.proxyMtx.Unlock()
 	mem.logger.Debug("Get tx", "from", from, "to", to)
@@ -340,15 +330,15 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 		for _, txHash := range ptx.Data.TxIds {
 			txHashTmp := make([]byte, 32)
 			copy(txHashTmp, txHash[:])
-			if (mem.txsHashMap[txHash] == nil) {
-				mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+			if (mem.txsHashMap[txHash] == nil && height > 0) {
+				mem.fetchingTx[height] = append(mem.fetchingTx[height], txHashTmp)
 				missedTxs = append(missedTxs, txHashTmp)
 				missTx = true
 			}
 		}
 		if (missTx) {
 			mem.logger.Info("Missing tx")
-			mem.NotifiyFetchingTx(missedTxs)
+			mem.NotifiyFetchingTx(height, missedTxs)
 			return true, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTx {
@@ -367,12 +357,12 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 		tx := mem.txsHashMap[types.BytesToHash(hash)]
 		if (tx != nil) {
 			return false, tx
-		} else {
+		} else if height > 0 {
 			txHashTmp := make([]byte, 32)
 			copy(txHashTmp, hash[:])
-			mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+			mem.fetchingTx[height] = append(mem.fetchingTx[height], txHashTmp)
 			missedTxs = append(missedTxs, txHashTmp)
-			mem.NotifiyFetchingTx(missedTxs)
+			mem.NotifiyFetchingTx(height, missedTxs)
 			return false, nil
 		}
 	} else if from == types.RawTxHash && to == types.RawTxHash {
@@ -381,12 +371,12 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 				return false, nil
 			}
 		}
-		if mem.txsHashMap[types.BytesToHash(hash)] == nil {
+		if mem.txsHashMap[types.BytesToHash(hash)] == nil && height > 0 {
 			txHashTmp := make([]byte, 32)
 			copy(txHashTmp, hash[:])
-			mem.fetchingTx = append(mem.fetchingTx, txHashTmp)
+			mem.fetchingTx[height] = append(mem.fetchingTx[height], txHashTmp)
 			missedTxs = append(missedTxs, txHashTmp)
-			mem.NotifiyFetchingTx(missedTxs)
+			mem.NotifiyFetchingTx(height, missedTxs)
 			return true, nil
 		}
 	} else if from == types.ParallelTxHash && to == types.ParallelTx {
@@ -419,6 +409,12 @@ func (mem *Mempool) GetTx(hash []byte, from int32, to int32) (bool, types.Tx) {
 //     It gets called from another goroutine.
 // CONTRACT: Either cb will get called, or err returned.
 func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, local bool, cb func(*abci.Response)) (err error) {
+	// CACHE
+	if mem.cache.Exists(tx) {
+		return fmt.Errorf("Tx already exists in cache")
+	}
+	mem.cache.Push(tx)
+	// END CACHE
 	// Note: If it is parallel tx, just PushBack to ptxs
 	if txType == types.ParallelTx {
 		memTx := &mempoolTx{
@@ -454,13 +450,6 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 	}
 	// // Use the hash send from remote peer
 	// mem.handleTxArrive(hash)
-	// CACHE
-	if mem.cache.Exists(tx) {
-		mem.logger.Info("Tx already exists in cache")
-		return nil
-	}
-	mem.cache.Push(tx)
-	// END CACHE
 
 	// WAL
 	// if mem.wal != nil {
@@ -502,20 +491,23 @@ func (mem *Mempool) resCb(req *abci.Request, res *abci.Response) {
 	}
 }
 
-func (mem *Mempool) handleTxArrive(height int64, txHash []byte) {
+func (mem *Mempool) handleTxArrive(txHash []byte) {
 	if (len(mem.fetchingTx) == 0 || txHash == nil) {
 		return
 	}
-	for index, hash := range mem.fetchingTx {
-		if (bytes.Equal(hash, txHash)) {
-			mem.fetchingTx = append(mem.fetchingTx[:index], mem.fetchingTx[index+1:]...)
-			break
+	for height := range mem.fetchingTx {
+		for index, hash := range mem.fetchingTx[height] {
+			if (bytes.Equal(hash, txHash)) {
+				mem.fetchingTx[height] = append(mem.fetchingTx[height][:index], mem.fetchingTx[height][index+1:]...)
+				mem.logger.Info("Received txhash", txHash, "in height", height)
+				if (len(mem.fetchingTx[height]) == 0) {
+					// notify, the txHash not useful now
+					mem.logger.Info("txs all arrived")
+					mem.TxsAllRequested <- height
+				}
+				return
+			}
 		}
-	}
-	if (len(mem.fetchingTx) == 0) {
-		// notify, the txHash not useful now
-		mem.logger.Info("txs all arrived")
-		mem.TxsAllRequested <- height
 	}
 }
 
@@ -534,43 +526,38 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 				mem.cache.Remove(tx)
 			}
 
-			txHeight := (int64)(-1)
-			if height := mem.isInPendingBlock(tx); height > 0 {
-				mem.uncommittedTxs[height] = append(mem.uncommittedTxs[height], memTx)
-				txHeight = height
-			} else {
-				// f, _ := os.Create("/tmp/replaydata")
-				// defer f.Close()
-				// fmt.Println("--------------------")
-				// fmt.Println("hash len", len(r.CheckTx.Data), "data len", len(tx))
-				// fmt.Println("--------------------")
-				// f.Write(r.CheckTx.Data)
-				// f.Write(tx)
-				// f.Sync()
-				mem.txs.PushBack(memTx)
-				if (disablePtx || usePtxHash) {
-					hashValue := types.BytesToHash(r.CheckTx.Data)
-					mem.txsHashMap[hashValue] = tx
-					if mem.wal != nil {
-						timeStamp := time.Now()
-						mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
-								timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
-					}
+			// // f, _ := os.Create("/tmp/replaydata")
+			// f, _ := os.OpenFile("/tmp/replaydata", os.O_WRONLY|os.O_APPEND, 0666)
+			// defer f.Close()
+			// fmt.Println("--------------------")
+			// fmt.Println("hash len", len(r.CheckTx.Data), "data len", len(tx))
+			// fmt.Println("--------------------")
+			// f.Write(r.CheckTx.Data)
+			// f.Write(tx)
+			// f.Sync()
+			mem.txs.PushBack(memTx)
+			if (disablePtx || usePtxHash) {
+				hashValue := types.BytesToHash(r.CheckTx.Data)
+				mem.txsHashMap[hashValue] = tx
+				if mem.wal != nil {
+					timeStamp := time.Now()
+					mem.wal.Write([]byte(fmt.Sprintf("[%d:%d:%d:%d] Add Tx{0x%X}\n",
+							timeStamp.Hour(), timeStamp.Minute(), timeStamp.Second(), timeStamp.Nanosecond(), hashValue)))
 				}
-				if disablePtx && compactBlock {
-					memTxHash := &mempoolTx{
-						counter: mem.counter,
-						height:  mem.height,
-						tx:      types.Tx(r.CheckTx.Data),
-					}
-					mem.txsHash.PushBack(memTxHash)
-				}
-				if disablePtx {
-					mem.notifyTxsAvailable()
-				}
-				mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
 			}
-			mem.handleTxArrive(txHeight, r.CheckTx.Data)
+			if disablePtx && compactBlock {
+				memTxHash := &mempoolTx{
+					counter: mem.counter,
+					height:  mem.height,
+					tx:      types.Tx(r.CheckTx.Data),
+				}
+				mem.txsHash.PushBack(memTxHash)
+			}
+			if disablePtx {
+				mem.notifyTxsAvailable()
+			}
+			mem.handleTxArrive(r.CheckTx.Data)
+			mem.logger.Debug("Added good transaction", "tx", tx, "res", r)
 		} else {
 			// ignore bad transaction
 			mem.logger.Info("Rejected bad transaction", "tx", tx, "res", r)
@@ -584,14 +571,14 @@ func (mem *Mempool) resCbNormal(req *abci.Request, res *abci.Response) {
 		if r.GetTx.Code == abci.CodeTypeOK {
 			mem.logger.Info("Response_GetTx get missed tx hash is", r.GetTx.Response)
 			// TODO: handle missedHash
-			if (r.GetTx.Response != nil) {
-				missedTxs := make([][]byte, 0)
-				mem.fetchingTx = append(mem.fetchingTx, r.GetTx.Response)
-				missedTxs = append(missedTxs, r.GetTx.Response)
-				// send GetTx message to remote peer
-				// TODO: notify together, current is each pts to notify
-				mem.NotifiyFetchingTx(missedTxs)
-			}
+			// if (r.GetTx.Response != nil) {
+			// 	missedTxs := make([][]byte, 0)
+			// 	mem.fetchingTx = append(mem.fetchingTx, r.GetTx.Response)
+			// 	missedTxs = append(missedTxs, r.GetTx.Response)
+			// 	// send GetTx message to remote peer
+			// 	// TODO: notify together, current is each pts to notify
+			// 	mem.NotifiyFetchingTx(missedTxs)
+			// }
 		} else {
 			mem.logger.Info("Response_GetTx return error", r.GetTx.Code)
 		}
@@ -636,16 +623,6 @@ func (mem *Mempool) resCbRecheck(req *abci.Request, res *abci.Response) {
 	default:
 		// ignore other messages
 	}
-}
-
-func (mem *Mempool) isInPendingBlock(tx types.Tx) int64 {
-	for height, txs := range mem.pendingBlockTxs {
-		if _, ok := txs[string(tx)]; ok {
-			return height
-		}
-	}
-
-	return 0
 }
 
 // TxsAvailable returns a channel which fires once for every height,
@@ -789,13 +766,11 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				}
 				delete(mem.uncommittedTxsHash, height)
 				delete(mem.uncommittedTxs, height)
-				delete(mem.pendingBlockTxs, height)
 				return nil
 			}
 		} else {
 			if _, ok := mem.uncommittedTxs[height]; ok {
 				delete(mem.uncommittedTxs, height)
-				delete(mem.pendingBlockTxs, height)
 				return nil
 			}
 		}
@@ -813,13 +788,11 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 				}
 			}
 			delete(mem.uncommittedPtxs, height)
-			delete(mem.pendingBlockTxs, height)
 			return nil
 		}
 	} else {
 		if _, ok := mem.uncommittedPtxsHash[height]; ok {
 			delete(mem.uncommittedPtxsHash, height)
-			delete(mem.pendingBlockTxs, height)
 			return nil
 		}
 	}
@@ -904,10 +877,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		mem.uncommittedPtxs[height] = txs
 	}
 
-	if !replay_txs {
-		mem.pendingBlockTxs[height] = txsMap
-	}
-
 	// Set height
 	mem.height = height
 	mem.notifiedTxsAvailable = false
@@ -933,14 +902,15 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	for e := mem.ptxsHash.Front(); e != nil; e = e.Next() {
 		mem.ptxsHash.Remove(e)
 	}
-	mem.fetchingTx = mem.fetchingTx[:0]
+	if _, ok := mem.fetchingTx[height]; ok {
+		delete(mem.fetchingTx, height)
+	}
 
 	mem.logger.Info("After Update() txs size", mem.txs.Len())
 	mem.logger.Info("After Update() txsHash size", mem.txsHash.Len())
 	mem.logger.Info("After Update() ptxs size", mem.ptxs.Len())
 	mem.logger.Info("After Update() ptxsHash size", mem.ptxsHash.Len())
 	mem.logger.Info("After Update() txsHashMap size", len(mem.txsHashMap))
-	mem.logger.Info("After Update() pendingBlockTx size", len(mem.pendingBlockTxs))
 	mem.logger.Info("After Update() uncommitted txs size", len(mem.uncommittedTxs))
 	mem.logger.Info("After Update() uncommitted txsHash size", len(mem.uncommittedTxsHash))
 	mem.logger.Info("After Update() uncommitted ptxs size", len(mem.uncommittedPtxs))
@@ -949,7 +919,6 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 	if mem.wal != nil {
 		mem.wal.Sync()
 	}
-	//mem.NotifiyFetchingTx()
 	return nil
 }
 
@@ -1009,7 +978,7 @@ func (mem *Mempool) Restore(height int64) {
 				mem.txs.PushBack(txs[i])
 			}
 			delete(mem.uncommittedTxs, height)
-			delete(mem.pendingBlockTxs, height)
+			delete(mem.uncommittedTxsHash, height)
 		}
 		if txs, ok := mem.uncommittedTxsHash[height]; ok {
 			size := len(txs)
@@ -1026,7 +995,6 @@ func (mem *Mempool) Restore(height int64) {
 			}
 			delete(mem.uncommittedTxs, height)
 			delete(mem.uncommittedTxsHash, height)
-			delete(mem.pendingBlockTxs, height)
 		}
 	} else {
 		if txs, ok := mem.uncommittedPtxs[height]; ok {
@@ -1036,8 +1004,10 @@ func (mem *Mempool) Restore(height int64) {
 			}
 			delete(mem.uncommittedTxs, height)
 			delete(mem.uncommittedTxsHash, height)
-			delete(mem.pendingBlockTxs, height)
 		}
+	}
+	if _, ok := mem.fetchingTx[height]; ok {
+		delete(mem.fetchingTx, height)
 	}
 }
 

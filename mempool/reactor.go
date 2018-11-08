@@ -120,7 +120,7 @@ func (memR *MempoolReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 		// broadcasting happens from go routines per peer
 	case *GetTxMessage:
 		for _, hash := range msg.Hash {
-			_, tx := memR.Mempool.GetTx(hash, types.RawTxHash, types.RawTx)
+			_, tx := memR.Mempool.GetTx(-1, hash, types.RawTxHash, types.RawTx)
 			if (tx == nil) {
 				txHash := types.BytesToHash(hash)
 				memR.Logger.Error("GetTxMessage:Can not find tx", "hash", fmt.Sprintf("{0x%X}", txHash))
