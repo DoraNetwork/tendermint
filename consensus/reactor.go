@@ -1121,6 +1121,9 @@ func (ps *PeerState) SetHasProposalCMPCTBlockPart(height int64, round int, index
 // PickSendVote picks a vote and sends it to the peer.
 // Returns true if vote was sent.
 func (ps *PeerState) PickSendVote(votes types.VoteSetReader) bool {
+	ps.mtx.Lock()
+	defer ps.mtx.Unlock()
+
 	if vote, ok := ps.PickVoteToSend(votes); ok {
 		msg := &VoteMessage{vote}
 		prs := ps.getRoundStateAtHeight(votes.Height())
@@ -1138,9 +1141,6 @@ func (ps *PeerState) PickSendVote(votes types.VoteSetReader) bool {
 // Returns true if a vote was picked.
 // NOTE: `votes` must be the correct Size() for the Height().
 func (ps *PeerState) PickVoteToSend(votes types.VoteSetReader) (vote *types.Vote, ok bool) {
-	ps.mtx.Lock()
-	defer ps.mtx.Unlock()
-
 	if votes.Size() == 0 {
 		return nil, false
 	}
@@ -1455,8 +1455,6 @@ func (ps *PeerState) String() string {
 
 // StringIndented returns a string representation of the PeerState
 func (ps *PeerState) StringIndented(indent string) string {
-	ps.mtx.Lock()
-	defer ps.mtx.Unlock()
 	return fmt.Sprintf(`PeerState{
 %s  Key %v
 %s  PRS %v
