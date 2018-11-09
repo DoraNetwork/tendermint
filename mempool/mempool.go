@@ -456,7 +456,8 @@ func (mem *Mempool) CheckTx(tx types.Tx, hash types.CommonHash, txType int32, lo
 	// mem.handleTxArrive(hash)
 	// CACHE
 	if mem.cache.Exists(tx) {
-		return fmt.Errorf("Tx already exists in cache")
+		mem.logger.Info("Tx already exists in cache")
+		return nil
 	}
 	mem.cache.Push(tx)
 	// END CACHE
@@ -1006,11 +1007,16 @@ func (mem *Mempool) Restore(height int64) {
 			size := len(txs)
 			for i := 0; i < size; i++ {
 				mem.txs.PushBack(txs[i])
-				mem.txsHash.PushBack(txs[i].tx)
 			}
 			delete(mem.uncommittedTxs, height)
-			delete(mem.uncommittedTxsHash, height)
 			delete(mem.pendingBlockTxs, height)
+		}
+		if txs, ok := mem.uncommittedTxsHash[height]; ok {
+			size := len(txs)
+			for i := 0; i < size; i++ {
+				mem.txsHash.PushBack(txs[i])
+			}
+			delete(mem.uncommittedTxsHash, height)
 		}
 	} else if usePtxHash {
 		if txs, ok := mem.uncommittedPtxsHash[height]; ok {
