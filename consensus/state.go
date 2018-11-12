@@ -99,6 +99,7 @@ type ConsensusState struct {
 
 	// internal state
 	mtx sync.Mutex
+	commitMtx sync.Mutex	// lock finalizeCommit
 	roundStates map[int64]*RoundStateWrapper
 	state sm.State // State until height-1.
 
@@ -1819,6 +1820,12 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// 	cs.Logger.Debug(cmn.Fmt("finalizeCommit(%v): Invalid args. Current step: %v/%v/%v", height, cs.Height, cs.Round, cs.Step))
 	// 	return
 	// }
+	cs.commitMtx.Lock()
+	defer cs.commitMtx.Unlock()
+	if cs.state.LastBlockHeight != height - 1 {
+		cs.Logger.Debug("Already commited", "height", height, "LastBlockHeight", cs.state.LastBlockHeight)
+		return
+	}
 
 	rs := cs.GetRoundStateAtHeight(height)
 	if rs.Step != cstypes.RoundStepCommit {
