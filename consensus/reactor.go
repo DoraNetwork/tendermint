@@ -1128,7 +1128,7 @@ func (ps *PeerState) PickSendVote(votes types.VoteSetReader) bool {
 		msg := &VoteMessage{vote}
 		prs := ps.getRoundStateAtHeight(votes.Height())
 		if prs.CatchupCommitRound >= 0 {
-			ps.logger.Debug("Sending vote message for catchup", "ps", ps, "vote", vote, "catchup round", prs.CatchupCommitRound)
+			ps.logger.Debug("Sending vote message for catchup", "ps", ps, "vote", vote, "catchup_round", prs.CatchupCommitRound)
 		} else {
 			ps.logger.Debug("Sending vote message", "ps", ps, "vote", vote)
 		}
@@ -1355,7 +1355,7 @@ func (ps *PeerState) ApplyNewRoundStepMessage(msg *NewRoundStepMessage) {
 	lh := msg.Height - 3
 	if lh > ps.latestHeight {
 		ps.latestHeight = lh
-		ps.logger.Debug("ApplyNewRoundStepMessage lastestheight", ps.latestHeight, "prs height", msg.Height)
+		ps.logger.Debug("ApplyNewRoundStepMessage", "lastestheight", ps.latestHeight, "prs_height", msg.Height)
 	}
 
 	// if psHeight == msg.Height && psRound != msg.Round && msg.Round == psCatchupCommitRound {
@@ -1394,7 +1394,7 @@ func (ps *PeerState) ApplyCommitStepMessage(msg *CommitStepMessage) {
 	prs.ProposalBlockParts = msg.BlockParts
 	prs.ProposalCMPCTBlockParts = msg.BlockParts
 
-	ps.logger.Debug("ApplyCommitStepMessage header", prs.ProposalBlockPartsHeader.String())
+	ps.logger.Debug("ApplyCommitStepMessage", "height", msg.Height, "header", prs.ProposalBlockPartsHeader.String())
 }
 
 // ApplyProposalPOLMessage updates the peer state for the new proposal POL.

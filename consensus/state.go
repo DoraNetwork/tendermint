@@ -1177,9 +1177,9 @@ func (cs *ConsensusState) canEnterPropose(height int64, round int) bool {
 			cs.Logger.Debug("Proposal is nil")
 		} else {
 			if preRs.Proposal.POLRound >= 0 {
-				cs.Logger.Debug("Proposal POLRound is", preRs.Proposal.POLRound)
-				cs.Logger.Debug("POLRound majority", preRs.Votes.Prevotes(preRs.Proposal.POLRound).HasTwoThirdsMajority())
-				cs.Logger.Debug("rsRound majority", preRs.Votes.Prevotes(preRs.Round).HasTwoThirdsMajority())
+				cs.Logger.Debug("Proposal", "POLRound", preRs.Proposal.POLRound)
+				cs.Logger.Debug("POLRound", "majority", preRs.Votes.Prevotes(preRs.Proposal.POLRound).HasTwoThirdsMajority())
+				cs.Logger.Debug("rsRound", "majority", preRs.Votes.Prevotes(preRs.Round).HasTwoThirdsMajority())
 			}
 		}
 		if preRs.ProposalBlock == nil {
@@ -1618,7 +1618,6 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 	rs.LockedBlockParts = nil
 
 	if !rs.ProposalBlockParts.HasHeader(blockID.PartsHeader) {
-		cs.Logger.Debug("Havent received committed block, reset ProposalBlockParts to let peer gossip data")
 		CMPCTBlockID, ok := rs.Votes.Prevotes(round).GetCMPCTBlockMaj23()
 		if compactBlock && !ok {
 			cmn.PanicSanity(cmn.Fmt("Havent get cmpct block maj23 in precommit, this may not happen"))
@@ -1627,6 +1626,9 @@ func (cs *ConsensusState) enterPrecommit(height int64, round int) {
 		rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 		rs.ProposalCMPCTBlock = nil
 		rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(CMPCTBlockID.PartsHeader)
+		cs.Logger.Debug("Havent received committed block, reset to", 
+			"ProposalBlockParts", rs.ProposalBlockParts.Header().String(),
+			"CMPCTProposalBlockParts", rs.ProposalCMPCTBlockParts.Header().String())
 	}
 	cs.eventBus.PublishEventUnlock(cs.RoundStateEvent(height))
 	cs.signAddVote(rs, types.VoteTypePrecommit, nil, types.PartSetHeader{}, nil, types.PartSetHeader{})
@@ -1747,6 +1749,9 @@ func (cs *ConsensusState) enterCommit(height int64, commitRound int) {
 			rs.ProposalBlockParts = types.NewPartSetFromHeader(blockID.PartsHeader)
 			rs.ProposalCMPCTBlock = nil
 			rs.ProposalCMPCTBlockParts = types.NewPartSetFromHeader(CMPCTBlockID.PartsHeader)
+			cs.Logger.Debug("Received block is not right, reset to", 
+				"ProposalBlockParts", rs.ProposalBlockParts.Header().String(),
+				"CMPCTProposalBlockParts", rs.ProposalCMPCTBlockParts.Header().String())
 		} else {
 			// We just need to keep waiting.
 		}
@@ -1912,7 +1917,7 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 
 	if rs.Round != rs.CommitRound {
 		// reset Round to CommitRound fix rollback issue
-		cs.Logger.Info("Height", height, "reset round", rs.Round, "to commit round", rs.CommitRound)
+		cs.Logger.Info("After commit reset Height", height, "rs_round", rs.Round, "commit_round", rs.CommitRound)
 		rs.Round = rs.CommitRound
 		rs.Step = cstypes.RoundStepCommit
 	}
@@ -2079,7 +2084,8 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// TODO: proposal block and proposal cmpct block parts need rebuild
 		rs.ProposalCMPCTBlock = wire.ReadBinary(&types.Block{}, rs.ProposalCMPCTBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
-		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash())
+		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash(),
+			"cmpct_parts_hash", data.Bytes(rs.ProposalCMPCTBlockParts.Hash()))
 		types.RcCMPCTBlock(height, rs.ProposalCMPCTBlock, rs.ProposalCMPCTBlockParts)
 		// assign cmpctblock to block directly
 		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer

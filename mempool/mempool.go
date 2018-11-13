@@ -906,15 +906,15 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 		delete(mem.fetchingTx, height)
 	}
 
-	mem.logger.Info("After Update() txs size", mem.txs.Len())
-	mem.logger.Info("After Update() txsHash size", mem.txsHash.Len())
-	mem.logger.Info("After Update() ptxs size", mem.ptxs.Len())
-	mem.logger.Info("After Update() ptxsHash size", mem.ptxsHash.Len())
-	mem.logger.Info("After Update() txsHashMap size", len(mem.txsHashMap))
-	mem.logger.Info("After Update() uncommitted txs size", len(mem.uncommittedTxs))
-	mem.logger.Info("After Update() uncommitted txsHash size", len(mem.uncommittedTxsHash))
-	mem.logger.Info("After Update() uncommitted ptxs size", len(mem.uncommittedPtxs))
-	mem.logger.Info("After Update() uncommitted ptxsHash size", len(mem.uncommittedPtxsHash))
+	mem.logger.Info("After Update() txs", "size", mem.txs.Len())
+	mem.logger.Info("After Update() txsHash", "size", mem.txsHash.Len())
+	mem.logger.Info("After Update() ptxs", "size", mem.ptxs.Len())
+	mem.logger.Info("After Update() ptxsHash", "size", mem.ptxsHash.Len())
+	mem.logger.Info("After Update() txsHashMap", "size", len(mem.txsHashMap))
+	mem.logger.Info("After Update() uncommitted txs", "size", len(mem.uncommittedTxs))
+	mem.logger.Info("After Update() uncommitted txsHash", "size", len(mem.uncommittedTxsHash))
+	mem.logger.Info("After Update() uncommitted ptxs", "size", len(mem.uncommittedPtxs))
+	mem.logger.Info("After Update() uncommitted ptxsHash", "size", len(mem.uncommittedPtxsHash))
 
 	if mem.wal != nil {
 		mem.wal.Sync()
@@ -926,7 +926,7 @@ func (mem *Mempool) Update(height int64, txs types.Txs) error {
 func (mem *Mempool) filterTxs(height int64, blockTxsMap map[string]struct{}) []types.Tx {
 	goodTxs := make([]types.Tx, 0, mem.txs.Len())
 	removedTxs := make([]*mempoolTx, 0, mem.txs.Len())
-	mem.logger.Info("Before update mempool, tx size", mem.txs.Len())
+	mem.logger.Info("Before update mempool", "tx_size", mem.txs.Len())
 	for e := mem.txs.Front(); e != nil; e = e.Next() {
 		memTx := e.Value.(*mempoolTx)
 		// Remove the tx if it's alredy in a block.
