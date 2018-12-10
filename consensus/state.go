@@ -2084,7 +2084,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// TODO: proposal block and proposal cmpct block parts need rebuild
 		rs.ProposalCMPCTBlock = wire.ReadBinary(&types.Block{}, rs.ProposalCMPCTBlockParts.GetReader(),
 			cs.state.ConsensusParams.BlockSize.MaxBytes, &n, &err).(*types.Block)
-		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, "round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash(),
+		cs.Logger.Info("Received complete proposal cmpct block", "height", rs.ProposalCMPCTBlock.Height, 		"round", rs.Round, "hash", rs.ProposalCMPCTBlock.Hash(),
 			"cmpct_parts_hash", data.Bytes(rs.ProposalCMPCTBlockParts.Hash()))
 		types.RcCMPCTBlock(height, rs.ProposalCMPCTBlock, rs.ProposalCMPCTBlockParts)
 		// assign cmpctblock to block directly
@@ -2161,7 +2161,7 @@ func (cs *ConsensusState) tryAddVote(vote *types.Vote, peerKey string) error {
 //-----------------------------------------------------------------------------
 
 func (cs *ConsensusState) addVote(vote *types.Vote, peerKey string) (added bool, err error) {
-	cs.Logger.Debug("addVote", "voteHeight", vote.Height, "voteRound", vote.Round, "voteType", vote.Type, "valIndex", vote.ValidatorIndex)
+	cs.Logger.Debug("addVote", "voteHeight", vote.Height, "voteRound", vote.Round, "voteType", vote.Type, "valIndex", vote.ValidatorIndex, "vote", vote)
 
 	rs := cs.getRoundStateAtHeight(vote.Height)
 	// TODO: should consider below scenario?

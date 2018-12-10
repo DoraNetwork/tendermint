@@ -98,10 +98,12 @@ func (vote *Vote) String() string {
 		cmn.PanicSanity("Unknown vote type")
 	}
 
-	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %v @ %s}",
+	return fmt.Sprintf("Vote{%v:%X %v/%02d/%v(%v) %X %X %v @ %s}",
 		vote.ValidatorIndex, cmn.Fingerprint(vote.ValidatorAddress),
 		vote.Height, vote.Round, vote.Type, typeString,
-		cmn.Fingerprint(vote.BlockID.Hash), vote.Signature,
+		cmn.Fingerprint(vote.BlockID.Hash),
+		cmn.Fingerprint(vote.CMPCTBlockID.PartsHeader.Hash),
+		vote.Signature,
 		CanonicalTime(vote.Timestamp))
 }
 
