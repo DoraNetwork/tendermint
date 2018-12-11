@@ -793,10 +793,10 @@ func (cs *ConsensusState) handleMsg(mi msgInfo) {
 		err = cs.setProposal(msg.Proposal, peerKey == "")
 	case *BlockPartMessage:
 		// if the proposal is complete, we'll enterPrevote or tryFinalizeCommit
-		_, err = cs.addProposalBlockPart(msg.Height, msg.Part, peerKey != "")
+		_, err = cs.addProposalBlockPart(msg.Height, msg.Part)
 	case *CMPCTBlockPartMessage:
 		// if the proposal is complete, we'll enterPrevote or tryFinalizeCommit
-		_, err = cs.addProposalCMPCTBlockPart(msg.Height, msg.Part, peerKey != "")
+		_, err = cs.addProposalCMPCTBlockPart(msg.Height, msg.Part)
 	case *VoteMessage:
 		// attempt to add the vote and dupeout the validator if its a duplicate signature
 		// if the vote gives us a 2/3-any or 2/3-one, we transition
@@ -2009,7 +2009,7 @@ func (cs *ConsensusState) updateMemPool(height int64, rs *RoundStateWrapper) {
 
 // NOTE: block is not necessarily valid.
 // Asynchronously triggers either enterPrevote (before we timeout of propose) or tryFinalizeCommit, once we have the full block.
-func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
+func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part) (added bool, err error) {
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
@@ -2022,7 +2022,7 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 		return false, nil // TODO: bad peer? Return error?
 	}
 
-	added, err = rs.ProposalBlockParts.AddPart(part, verify)
+	added, err = rs.ProposalBlockParts.AddPart(part)
 	if err != nil {
 		return added, err
 	}
@@ -2055,7 +2055,7 @@ func (cs *ConsensusState) addProposalBlockPart(height int64, part *types.Part, v
 }
 
 // NOTE: block is not necessarily valid.
-func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Part, verify bool) (added bool, err error) {
+func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Part) (added bool, err error) {
 	// Blocks might be reused, so round mismatch is OK
 	// if cs.Height != height {
 	// 	return false, nil
@@ -2071,7 +2071,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 	if rs.ProposalCMPCTBlockParts == nil {
 		return false, nil // TODO: bad peer? Return error?
 	}
-	added, err = rs.ProposalCMPCTBlockParts.AddPart(part, verify)
+	added, err = rs.ProposalCMPCTBlockParts.AddPart(part)
 	if err != nil {
 		return added, err
 	}
@@ -2090,7 +2090,7 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 		// assign cmpctblock to block directly
 		// filter the tx in cmpct block to ensure all tx app have, if dont, need get from other peer
 		missTxBool := false
-		if verify && len(rs.ProposalCMPCTBlock.Txs) != 0 {
+		if len(rs.ProposalCMPCTBlock.Txs) != 0 {
 			for _, tx := range rs.ProposalCMPCTBlock.Txs {
 				missTxs := false
 				if disablePtx {
@@ -2105,15 +2105,15 @@ func (cs *ConsensusState) addProposalCMPCTBlockPart(height int64, part *types.Pa
 			}
 			cs.Logger.Info("verify GetTx over")
 		}
-		// if do not need verify(is proposer) or all tx have in local,
+		// if all tx have in local,
 		// Assign ProposalCMPCTBlock to ProposalBlock direclty
-		if !verify || !missTxBool {
+		if !missTxBool {
 			if ((broadcastPtxHash && buildFullBlock) || disablePtx) && len(rs.ProposalCMPCTBlock.Txs) != 0 {
 				cs.buildFullBlockFromCMPCTBlock(height)
 			} else {
 				rs.ProposalBlock = rs.ProposalCMPCTBlock
 				rs.ProposalBlockParts = rs.ProposalCMPCTBlockParts
-				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
+				cs.Logger.Info("Assign cmpct block to ProposalBlock directly", "height", 		rs.ProposalBlock.Height, "hash", rs.ProposalBlock.Hash())
 				cs.updateMemPool(height, rs)
 				types.RcBlock(height, rs.ProposalBlock, rs.ProposalBlockParts)
 				if cs.isProposalComplete(height) &&
