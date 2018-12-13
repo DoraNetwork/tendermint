@@ -1916,9 +1916,9 @@ func (cs *ConsensusState) finalizeCommit(height int64) {
 	// Schedule Round0 to start soon.
 
 	if rs.Round != rs.CommitRound {
-		// reset Round to CommitRound fix rollback issue
-		cs.Logger.Info("After commit reset Height", height, "rs_round", rs.Round, "commit_round", rs.CommitRound)
-		rs.Round = rs.CommitRound
+		// reset step to RoundStepCommit fix rollback issue
+		cs.Logger.Info("After commit reset Height", height, "step", cstypes.RoundStepCommit)
+		// rs.Round = rs.CommitRound
 		rs.Step = cstypes.RoundStepCommit
 	}
 
